@@ -1,0 +1,123 @@
+name: Benchmark Strata
+# Deploys an ephemeral instance, runs Strata's benchmark suite, collects results,
+# and destroys the instance.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to benchmark"
+        default: "IQ3_XXS"
+        type: string
+      instance_type:
+        description: "Instance type"
+        default: "g6e.8xlarge"
+        type: string
+      benchmark_runs:
+        description: "Number of benchmark iterations"
+        default: "3"
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve prerequisites
+        id: prereqs
+        run: |
+          SNAP=$(aws ssm get-parameter \
+            --name "/strata/weights/${{ inputs.model }}/snapshot-id" \
+            --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          AMI=$(aws ssm get-parameter \
+            --name "/strata/latest-ami-id" \
+            --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          echo "snapshot_id=$SNAP" >> "$GITHUB_OUTPUT"
+          echo "ami_id=$AMI" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Deploy
+        working-directory: examples/ephemeral-on-demand
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="model=${{ inputs.model }}" \
+            -var="instance_type=${{ inputs.instance_type }}" \
+            -var="weights_snapshot_id=${{ steps.prereqs.outputs.snapshot_id }}" \
+            -var="ttl_minutes=45" \
+            -var="allowed_cidr_blocks=[\"$(curl -sf https://checkip.amazonaws.com)/32\"]"
+
+      - name: Wait for model
+        run: |
+          ENDPOINT=$(cd examples/ephemeral-on-demand && terraform output -raw endpoint)
+          for i in $(seq 1 180); do
+            curl -sf "$ENDPOINT/health" | grep -q '"loaded":true' && break
+            sleep 5
+          done
+
+      - name: Run benchmarks
+        id: bench
+        run: |
+          ENDPOINT=$(cd examples/ephemeral-on-demand && terraform output -raw endpoint)
+          mkdir -p results
+          
+          # Prompt processing benchmark
+          echo "## Prompt Speed" >> results/benchmark.md
+          for run in $(seq 1 ${{ inputs.benchmark_runs }}); do
+            curl -sf "$ENDPOINT/v1/chat/completions" \
+              -H "Content-Type: application/json" \
+              -d "{\"model\":\"strata\",\"messages\":[{\"role\":\"user\",\"content\":\"$(python3 -c "print('The quick brown fox jumps over the lazy dog. ' * 200)")\"}],\"max_tokens\":1}" \
+              | jq '{prompt_tokens: .usage.prompt_tokens, prompt_ms: .timings.prompt_ms, tok_per_sec: (.usage.prompt_tokens / (.timings.prompt_ms / 1000))}' \
+              >> results/prompt_bench.jsonl
+          done
+
+          # Generation speed benchmark
+          echo "## Generation Speed" >> results/benchmark.md
+          for run in $(seq 1 ${{ inputs.benchmark_runs }}); do
+            curl -sf "$ENDPOINT/v1/chat/completions" \
+              -H "Content-Type: application/json" \
+              -d '{"model":"strata","messages":[{"role":"user","content":"Write a detailed essay about operating systems"}],"max_tokens":512}' \
+              | jq '{completion_tokens: .usage.completion_tokens, gen_ms: .timings.generation_ms, tok_per_sec: (.usage.completion_tokens / (.timings.generation_ms / 1000))}' \
+              >> results/gen_bench.jsonl
+          done
+
+          # Aggregate
+          echo "| Metric | Value |" >> results/benchmark.md
+          echo "|--------|-------|" >> results/benchmark.md
+          echo "| Prompt tok/s | $(jq -s '[.[].tok_per_sec] | add/length | round' results/prompt_bench.jsonl) |" >> results/benchmark.md
+          echo "| Gen tok/s | $(jq -s '[.[].tok_per_sec] | add/length | round' results/gen_bench.jsonl) |" >> results/benchmark.md
+          echo "| Instance | ${{ inputs.instance_type }} |" >> results/benchmark.md
+          echo "| Model | ${{ inputs.model }} |" >> results/benchmark.md
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: strata-bench-${{ inputs.model }}-${{ github.run_number }}
+          path: results/
+
+      - name: Summary
+        run: cat results/benchmark.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Destroy
+        if: always()
+        working-directory: examples/ephemeral-on-demand
+        run: terraform destroy -auto-approve

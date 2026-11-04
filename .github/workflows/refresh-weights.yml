@@ -1,0 +1,144 @@
+name: Refresh Model Weights Snapshot
+# Downloads model weights onto a fresh EBS volume, creates a snapshot, and enables
+# Fast Snapshot Restore so future instances get instant access.
+#
+# Trigger: manually when a new model should be made available, or when Strata
+# releases a new quantization.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model ID (e.g. IQ3_XXS, UD-Q6_K_XL, Q2_0)"
+        required: true
+        default: "IQ3_XXS"
+        type: choice
+        options:
+          - IQ2_XS
+          - IQ3_XXS
+          - IQ3_S
+          - Q2_0
+          - UD-Q4_K_XL
+          - UD-Q5_K_XL
+          - UD-Q6_K_XL
+          - Q8_0
+      model_family:
+        description: "Model family"
+        default: "qwen"
+        type: choice
+        options:
+          - qwen
+          - coder
+          - swift
+          - gyro
+      volume_size_gib:
+        description: "Volume size in GiB"
+        default: "250"
+        type: string
+      availability_zone:
+        description: "AZ for FSR (match your target deployment AZ)"
+        default: "us-east-1a"
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # Downloads can take 30-90 min for large models
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Create staging environment
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="model=${{ inputs.model }}" \
+            -var="model_family=${{ inputs.model_family }}" \
+            -var="volume_size=${{ inputs.volume_size_gib }}" \
+            -var="availability_zones=[\"${{ inputs.availability_zone }}\"]" \
+            -var="staging_subnet_id=${{ vars.STAGING_SUBNET_ID }}"
+        working-directory: modules/strata-data-snapshot
+
+      - name: Wait for download to complete
+        run: |
+          INSTANCE_ID=$(cd modules/strata-data-snapshot && terraform output -json | jq -r '.staging_instance_id.value // empty')
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "Waiting for staging instance to provision..."
+            sleep 120
+            INSTANCE_ID=$(cd modules/strata-data-snapshot && terraform output -json | jq -r '.staging_instance_id.value')
+          fi
+          echo "Monitoring instance: $INSTANCE_ID"
+          
+          # Poll for the completion marker via SSM
+          for i in $(seq 1 180); do
+            RESULT=$(aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --parameters 'commands=["cat /var/lib/strata-download-complete 2>/dev/null || echo IN_PROGRESS"]' \
+              --query "Command.CommandId" --output text 2>/dev/null || echo "")
+            if [ -n "$RESULT" ]; then
+              sleep 10
+              OUTPUT=$(aws ssm get-command-invocation \
+                --command-id "$RESULT" \
+                --instance-id "$INSTANCE_ID" \
+                --query "StandardOutputContent" --output text 2>/dev/null || echo "IN_PROGRESS")
+              if echo "$OUTPUT" | grep -q "COMPLETE"; then
+                echo "Download complete: $OUTPUT"
+                break
+              fi
+            fi
+            echo "Still downloading... ($i/180)"
+            sleep 30
+          done
+        continue-on-error: true
+
+      - name: Create snapshot
+        run: |
+          # Snapshot is created by the terraform resource; re-apply to finalize
+          terraform apply -auto-approve \
+            -var="model=${{ inputs.model }}" \
+            -var="model_family=${{ inputs.model_family }}"
+        working-directory: modules/strata-data-snapshot
+
+      - name: Output snapshot ID
+        id: snap
+        run: |
+          SNAP_ID=$(terraform output -raw snapshot_id)
+          echo "snapshot_id=$SNAP_ID" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Weights Snapshot::$SNAP_ID"
+        working-directory: modules/strata-data-snapshot
+
+      - name: Save to SSM Parameter
+        run: |
+          MODEL="${{ inputs.model }}"
+          aws ssm put-parameter \
+            --name "/strata/weights/${MODEL}/snapshot-id" \
+            --value "${{ steps.snap.outputs.snapshot_id }}" \
+            --type String \
+            --overwrite
+
+      - name: Teardown staging instance (keep volume + snapshot)
+        run: |
+          # Destroy just the instance, the snapshot remains
+          terraform destroy -auto-approve \
+            -target=aws_instance.staging \
+            -target=aws_ebs_attachment.staging
+        working-directory: modules/strata-data-snapshot
+        continue-on-error: true

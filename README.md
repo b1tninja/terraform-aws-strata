@@ -1,0 +1,105 @@
+# strata-terraform
+
+Deploy [Strata](https://github.com/Niko1221/Strata) on AWS EC2 GPU instances with **instant cold-start** — from zero to serving in ~90 seconds.
+
+## What This Does
+
+Strata runs massive MoE models (Qwen3.8-Flash-Next, DeepSeek V4.1) by distributing 24,576 experts across GPU VRAM, system RAM, and SSD. This Terraform module:
+
+1. **Pre-bakes model weights** into an EBS snapshot
+2. **Enables EBS Fast Snapshot Restore** so volumes are fully initialized at creation (no lazy loading)
+3. **Bakes the Strata Docker image** into a custom AMI (no pull at boot)
+4. **Launches ephemeral GPU instances** that are serving within ~90 seconds
+
+```
+terraform apply → wait 90s → POST /v1/chat/completions → terraform destroy
+```
+
+## Quick Start
+
+```hcl
+module "strata" {
+  source = "github.com/b1tninja/strata-terraform"
+
+  instance_type    = "g6e.8xlarge"
+  model            = "IQ3_XXS"
+  model_family     = "qwen"
+  weights_snapshot_id = "snap-0abc123def456"  # pre-created
+  ami_id           = "ami-0abc123def456"      # pre-built
+  associate_public_ip = true
+  allowed_cidr_blocks = ["203.0.113.0/32"]    # your IP
+  ttl_minutes      = 60                        # auto-terminate
+
+  tags = { Environment = "dev" }
+}
+```
+
+## Prerequisites (one-time setup)
+
+| Step | Tool | Frequency |
+|------|------|-----------|
+| Build the AMI | `modules/strata-ami` or `.github/workflows/build-ami.yml` | On Strata release |
+| Create weights snapshot | `modules/strata-data-snapshot` or `.github/workflows/refresh-weights.yml` | Per model |
+
+After that, every deployment is just `terraform apply` → ready in 90s.
+
+## Supported Instances
+
+| Family | GPU | Compute Capability | Status |
+|--------|-----|-------------------|--------|
+| `g6e.*` | NVIDIA L40S (48GB) | 8.9 (Ada) | ✅ Recommended |
+| `g6.*` | NVIDIA L4 (24GB) | 8.9 (Ada) | ✅ Works |
+| `g5.*` | NVIDIA A10G (24GB) | 8.6 (Ampere) | ✅ Works |
+
+See [docs/MODELS.md](docs/MODELS.md) for model → instance mapping.
+
+## Repository Structure
+
+```
+strata-terraform/
+├── main.tf                  # Root module (instance + networking + IAM)
+├── variables.tf             # All configuration options
+├── outputs.tf               # Endpoint, IPs, IDs
+├── versions.tf              # Provider constraints
+├── modules/
+│   ├── strata-ami/          # EC2 Image Builder pipeline
+│   ├── strata-data-snapshot/ # Weights volume → snapshot → FSR
+│   └── strata-instance/     # Standalone instance module
+├── examples/
+│   ├── ephemeral-on-demand/ # Simplest: deploy + destroy
+│   ├── spot-fleet/          # Cost-optimized with spot
+│   └── full-pipeline/       # Build everything from scratch
+├── .github/workflows/
+│   ├── build-ami.yml        # Rebuild AMI (weekly/manual)
+│   ├── refresh-weights.yml  # Download model → snapshot → FSR
+│   ├── deploy-ephemeral.yml # Deploy → test → report
+│   └── benchmark.yml        # Deploy → benchmark → upload
+├── scripts/
+│   ├── wait-healthy.sh      # Poll /health until loaded
+│   └── teardown.sh          # Safe destroy wrapper
+└── docs/
+    ├── ARCHITECTURE.md      # How it works, why not SageMaker
+    ├── COST.md              # Pricing scenarios
+    └── MODELS.md            # Model → instance mapping
+```
+
+## GitHub Actions
+
+All workflows use OIDC (no stored AWS keys). Configure:
+- `secrets.AWS_ROLE_ARN` — IAM role with EC2/EBS/Image Builder permissions
+- `vars.BUILD_SUBNET_ID` / `vars.STAGING_SUBNET_ID` — subnet for build instances
+
+## Why Not SageMaker / Bedrock
+
+Strata's architecture needs:
+- All 24K experts pinned in RAM with `mlock`
+- AVX-512 CPU kernels running simultaneously with CUDA
+- SSD streaming for the 28.8GB n-gram table
+- Adaptive expert cache that learns during inference
+- Custom C++/CUDA engine (not a Python inference framework)
+
+None of which managed inference platforms support. Raw EC2 gives full hardware control.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Model weights are governed by their respective licenses (Qwen, DeepSeek, etc.).

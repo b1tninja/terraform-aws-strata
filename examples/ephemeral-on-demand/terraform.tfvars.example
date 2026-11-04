@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in your values
+region              = "us-east-1"
+model               = "IQ3_XXS"
+instance_type       = "g6e.8xlarge"
+weights_snapshot_id = "snap-0abc123def456789"
+ttl_minutes         = 60
+
+# Restrict to your IP for security:
+allowed_cidr_blocks = ["203.0.113.42/32"]

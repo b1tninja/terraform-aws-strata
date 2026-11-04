@@ -1,0 +1,72 @@
+name: Build Strata AMI
+# Rebuilds the AMI with the latest Strata Docker image baked in.
+# Trigger: manually or on a schedule (weekly to pick up Strata releases).
+
+on:
+  workflow_dispatch:
+    inputs:
+      strata_image_tag:
+        description: "Strata image tag to bake"
+        default: "latest-cuda13"
+        type: string
+  schedule:
+    # Weekly rebuild to stay current with driver + CUDA updates
+    - cron: "0 6 * * 1"  # Monday 06:00 UTC
+
+permissions:
+  id-token: write   # OIDC for AWS auth
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Initialize
+        run: terraform init
+        working-directory: modules/strata-ami
+
+      - name: Plan
+        run: |
+          terraform plan \
+            -var="strata_image_tag=${{ inputs.strata_image_tag || 'latest-cuda13' }}" \
+            -var="subnet_id=${{ vars.BUILD_SUBNET_ID }}" \
+            -out=tfplan
+        working-directory: modules/strata-ami
+
+      - name: Build AMI
+        run: terraform apply -auto-approve tfplan
+        working-directory: modules/strata-ami
+
+      - name: Capture AMI ID
+        id: ami
+        run: |
+          AMI_ID=$(terraform output -raw ami_id)
+          echo "ami_id=$AMI_ID" >> "$GITHUB_OUTPUT"
+          echo "::notice title=AMI Built::$AMI_ID"
+        working-directory: modules/strata-ami
+
+      - name: Save AMI ID to SSM Parameter
+        run: |
+          aws ssm put-parameter \
+            --name "/strata/latest-ami-id" \
+            --value "${{ steps.ami.outputs.ami_id }}" \
+            --type String \
+            --overwrite
+        working-directory: modules/strata-ami

@@ -1,0 +1,41 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Module lock files (only the root lock file should be committed)
+modules/*/.terraform.lock.hcl
+modules/*/.terraform/
+
+# CLI config
+.aws-config.json
+
+# Sensitive
+*.pem
+*.key
+terraform.tfvars
+!terraform.tfvars.example
+
+# Temp
+git-status.txt
+validate*.txt
+val-*.txt
+schema.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+

@@ -1,0 +1,152 @@
+name: Deploy Ephemeral Strata Instance
+# Launches a Strata instance, waits for the model to be ready, optionally runs
+# a test, and destroys the instance. This is the "ready at moments notice" workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model"
+        default: "IQ3_XXS"
+        type: string
+      instance_type:
+        description: "EC2 instance type"
+        default: "g6e.8xlarge"
+        type: choice
+        options:
+          - g6e.8xlarge
+          - g6e.12xlarge
+          - g6e.24xlarge
+          - g5.12xlarge
+          - g5.24xlarge
+          - g6.12xlarge
+      use_spot:
+        description: "Use spot pricing"
+        type: boolean
+        default: true
+      ttl_minutes:
+        description: "Instance lifetime in minutes"
+        default: "30"
+        type: string
+      weights_snapshot_id:
+        description: "EBS snapshot ID (leave empty for SSM lookup or cold download)"
+        default: ""
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      endpoint: ${{ steps.outputs.endpoint.outputs.value }}
+      instance_id: ${{ steps.outputs.instance_id.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve weights snapshot
+        id: snapshot
+        run: |
+          if [ -n "${{ inputs.weights_snapshot_id }}" ]; then
+            echo "snapshot_id=${{ inputs.weights_snapshot_id }}" >> "$GITHUB_OUTPUT"
+          else
+            SNAP=$(aws ssm get-parameter \
+              --name "/strata/weights/${{ inputs.model }}/snapshot-id" \
+              --query "Parameter.Value" --output text 2>/dev/null || echo "")
+            echo "snapshot_id=$SNAP" >> "$GITHUB_OUTPUT"
+            if [ -n "$SNAP" ]; then
+              echo "::notice title=Snapshot Found::$SNAP"
+            else
+              echo "::warning title=No Snapshot::Model will download on boot (slow first start)"
+            fi
+          fi
+
+      - name: Resolve AMI
+        id: ami
+        run: |
+          AMI=$(aws ssm get-parameter \
+            --name "/strata/latest-ami-id" \
+            --query "Parameter.Value" --output text 2>/dev/null || echo "")
+          echo "ami_id=$AMI" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Deploy instance
+        working-directory: examples/ephemeral-on-demand
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="model=${{ inputs.model }}" \
+            -var="instance_type=${{ inputs.instance_type }}" \
+            -var="weights_snapshot_id=${{ steps.snapshot.outputs.snapshot_id }}" \
+            -var="ttl_minutes=${{ inputs.ttl_minutes }}" \
+            -var="allowed_cidr_blocks=[\"$(curl -sf https://checkip.amazonaws.com)/32\"]"
+
+      - name: Extract outputs
+        id: outputs
+        working-directory: examples/ephemeral-on-demand
+        run: |
+          ENDPOINT=$(terraform output -raw endpoint 2>/dev/null || echo "")
+          INSTANCE_ID=$(terraform output -raw instance_id 2>/dev/null || echo "")
+          echo "endpoint={\"value\":\"$ENDPOINT\"}" >> "$GITHUB_OUTPUT"
+          echo "instance_id={\"value\":\"$INSTANCE_ID\"}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Strata Endpoint::$ENDPOINT"
+
+      - name: Wait for model to be ready
+        run: |
+          ENDPOINT="${{ steps.outputs.outputs.endpoint.value }}"
+          echo "Polling $ENDPOINT/health ..."
+          for i in $(seq 1 120); do
+            RESP=$(curl -sf "$ENDPOINT/health" 2>/dev/null || echo "{}")
+            if echo "$RESP" | grep -q '"loaded":true'; then
+              echo "Model ready after $((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "ERROR: Model not ready after 600s"
+          exit 1
+
+      - name: Smoke test (one inference call)
+        run: |
+          ENDPOINT="${{ steps.outputs.outputs.endpoint.value }}"
+          API_KEY=$(cd examples/ephemeral-on-demand && terraform output -json | jq -r '.api_key.value // empty')
+          curl -sf "$ENDPOINT/v1/chat/completions" \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"strata","messages":[{"role":"user","content":"Say hello in 3 words"}],"max_tokens":20}' \
+            | jq '.choices[0].message.content'
+
+      # Instance auto-terminates via TTL; for immediate cleanup, uncomment:
+      # - name: Destroy immediately
+      #   if: always()
+      #   working-directory: examples/ephemeral-on-demand
+      #   run: terraform destroy -auto-approve
+
+  # Optional: keep instance alive and report it so other jobs can use it
+  report:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## Strata Instance Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Endpoint:** \`${{ needs.deploy.outputs.endpoint }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Instance:** \`${{ needs.deploy.outputs.instance_id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **TTL:** ${{ inputs.ttl_minutes }} minutes" >> "$GITHUB_STEP_SUMMARY"
