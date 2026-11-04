@@ -192,7 +192,7 @@ resource "aws_launch_template" "strata" {
     }
   }
 
-  # Data volume — from FSR snapshot if available
+  # Data volume — from FSR snapshot if available (separate snapshot approach)
   dynamic "block_device_mappings" {
     for_each = var.weights_snapshot_id != "" ? [1] : []
     content {
@@ -209,9 +209,28 @@ resource "aws_launch_template" "strata" {
     }
   }
 
+  # Bundled AMI mode: the data volume comes from the AMI's own BDM.
+  # We override IOPS/throughput but don't specify a snapshot_id —
+  # it inherits from the AMI. Set volume_size to match the AMI's mapping.
+  dynamic "block_device_mappings" {
+    for_each = var.use_bundled_ami && var.weights_snapshot_id == "" ? [1] : []
+    content {
+      device_name = var.bundled_data_volume_device
+      ebs {
+        volume_size           = var.data_volume_size
+        volume_type           = "gp3"
+        iops                  = var.provisioned_iops
+        throughput            = var.provisioned_throughput
+        delete_on_termination = true
+        encrypted             = true
+        # No snapshot_id — inherited from AMI BDM
+      }
+    }
+  }
+
   # Data volume — empty, model downloads on first boot
   dynamic "block_device_mappings" {
-    for_each = var.weights_snapshot_id == "" ? [1] : []
+    for_each = var.weights_snapshot_id == "" && !var.use_bundled_ami ? [1] : []
     content {
       device_name = "/dev/sdb"
       ebs {
