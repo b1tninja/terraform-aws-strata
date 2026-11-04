@@ -1,0 +1,107 @@
+name: Quality
+# Runs on every PR: format, validate, lint, security scan, docs check, OpenTofu compat.
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - "**.tftpl"
+      - "**.hcl"
+      - ".github/workflows/quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**.tf"
+      - "**.tftpl"
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dflook/terraform-fmt-check@v1
+
+  validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate root
+        uses: dflook/terraform-validate@v1
+        with:
+          path: .
+      - name: Validate modules/strata-ami
+        uses: dflook/terraform-validate@v1
+        with:
+          path: modules/strata-ami
+      - name: Validate modules/strata-ami-bundled
+        uses: dflook/terraform-validate@v1
+        with:
+          path: modules/strata-ami-bundled
+      - name: Validate modules/strata-data-snapshot
+        uses: dflook/terraform-validate@v1
+        with:
+          path: modules/strata-data-snapshot
+      - name: Validate modules/strata-instance
+        uses: dflook/terraform-validate@v1
+        with:
+          path: modules/strata-instance
+
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+      - name: Init plugins
+        run: tflint --init
+      - name: Run lint
+        run: tflint --recursive --format=compact
+
+  security:
+    name: Trivy IaC Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  tofu:
+    name: OpenTofu Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+      - name: Tofu fmt check
+        run: tofu fmt -recursive -check
+      - name: Tofu validate
+        run: |
+          tofu init -backend=false
+          tofu validate
+
+  docs:
+    name: Docs Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: .
+          config-file: .terraform-docs.yml
+          output-file: README.md
+          output-section: inputs-outputs
+          fail-on-diff: true

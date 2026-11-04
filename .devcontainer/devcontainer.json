@@ -1,0 +1,38 @@
+{
+  "name": "strata-terraform",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "latest",
+      "tflint": "latest",
+      "installTFsec": true,
+      "installTerraformDocs": true
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "HashiCorp.terraform",
+        "terraform-lsp.terraform-lsp",
+        "ms-azuretools.vscode-docker",
+        "GitHub.vscode-github-actions",
+        "golangci.vscode-go-test-helper",
+        "ms-python.python"
+      ],
+      "settings": {
+        "terraform.languageServer.enable": true,
+        "terraform.validateOnSave": true,
+        "files.associations": {
+          "*.tftpl": "shellscript"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "tflint --init && terraform init -backend=false",
+  "remoteUser": "vscode"
+}

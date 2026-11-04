@@ -1,0 +1,17 @@
+formatter:
+  type: markdown
+  settings:
+    indent: 2
+    lockfile: .terraform.lock.hcl
+    sort_by_type: true
+    hide:
+      - header
+
+content: |
+  {{ .Inputs }}
+
+  {{ .Outputs }}
+
+  {{ .Modules }}
+
+  {{ .Resources }}

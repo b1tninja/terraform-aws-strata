@@ -24,11 +24,15 @@ modules/*/.terraform/
 terraform.tfvars
 !terraform.tfvars.example
 
-# Temp
+# Temp / validation output
+v*.txt
+val*.txt
+vv.txt
+bundled-*.txt
 git-status.txt
+gitstatus.txt
 validate*.txt
-val-*.txt
-schema.json
+schema*.json
 
 # OS
 .DS_Store
@@ -38,4 +42,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
 
