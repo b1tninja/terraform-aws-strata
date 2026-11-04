@@ -55,6 +55,79 @@
 |-----------|-----------|---------|---------------|
 ## Key AWS Services
 
+## Bundled Multi-Volume AMI (Recommended Approach)
+
+The `strata-ami-bundled` module creates a **single AMI whose block device mapping
+contains both the software layer AND the model weights**. This eliminates the
+separate snapshot management and leverages EBS incremental snapshots for cheap rebuilds.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Multi-Volume AMI                                                       │
+│                                                                          │
+│  BDM entry 1: /dev/sda1 → root snapshot (40GB)                          │
+│    Contains: OS + NVIDIA driver + Docker + nvidia-ctk + Strata image    │
+│                                                                          │
+│  BDM entry 2: /dev/sdb → data snapshot (250GB)                          │
+│    Contains: Model weights (Qwen GGUF shards, PLE table, MTP layer)     │
+│                                                                          │
+│  Rebuild for Strata update (new Docker image, new model):               │
+│    1. Launch instance from existing AMI (both volumes populated)        │
+│    2. docker pull new image / download new model on data volume         │
+│    3. aws_ami_from_instance → snapshots both volumes                   │
+│    4. Unchanged 250GB of weights = SAME S3 blocks (incremental!)        │
+│    5. New AMI costs only the delta (~100-500MB for patches)             │
+│                                                                          │
+│  Key facts:                                                              │
+│    • AMIs are REGION-scoped → automatically available in all AZs        │
+│    • EBS snapshots are stored in S3 → replicated across all AZs         │
+│    • Incremental snapshots deduplicate unchanged blocks across versions │
+│    • FSR pre-warms volume creation per-AZ ($0.75/hr per snapshot×AZ)    │
+│    • Production launch: terraform apply → 90s → serving                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Incremental Snapshots Solve the "Don't Re-Download" Problem
+
+EBS snapshots are **block-level incremental**:
+
+- First snapshot of 250GB volume → uploads 250GB to S3 ($12.50/month storage)
+- Second snapshot (same volume, only 200MB changed) → uploads 200MB, reuses existing blocks
+- Total storage: 250GB + 200MB ≈ 250.2GB (not 500GB!)
+- You can rebuild the AMI daily with Docker updates and the weights layer costs the same
+
+This means the "layer" of weights is **never re-downloaded** — it's already in S3
+as blocks referenced by every snapshot that includes them.
+
+### Deployment Flow (Bundled AMI)
+
+```
+# One-time (per model + per Strata version):
+module "bundled_ami" {
+  source      = "./modules/strata-ami-bundled"
+  model       = "IQ3_XXS"
+  subnet_id   = "subnet-abc"
+  data_volume_size = 250
+}
+
+# Every deploy (minutes, repeatable):
+module "strata" {
+  source           = "github.com/b1tninja/strata-terraform"
+  use_bundled_ami  = true
+  ami_id           = module.bundled_ami.ami_id
+  instance_type    = "g6e.8xlarge"
+  ttl_minutes      = 60
+}
+
+# Cleanup:
+terraform destroy
+```
+
+The production instance gets BOTH volumes from the AMI's BDM — no separate
+`weights_snapshot_id` needed, no separate FSR management.
+
+
+
 | Service | Role |
 |---------|------|
 | **EC2 Image Builder** | Build AMI with drivers + Docker + pre-pulled Strata image |
