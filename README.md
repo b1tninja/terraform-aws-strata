@@ -89,6 +89,21 @@ All workflows use OIDC (no stored AWS keys). Configure:
 - `secrets.AWS_ROLE_ARN` — IAM role with EC2/EBS/Image Builder permissions
 - `vars.BUILD_SUBNET_ID` / `vars.STAGING_SUBNET_ID` — subnet for build instances
 
+## Security & Lifecycle
+
+| Flag | Effect |
+|------|--------|
+| `use_secrets_manager` | Keeps the API key out of user_data. The instance fetches it at boot from Secrets Manager using its instance profile (IMDSv2 + `secretsmanager:GetSecretValue`). |
+| `secrets_manager_secret_id` | Reuse an existing secret (name or ARN) instead of creating one. Leave empty and Terraform creates `<name_prefix>/api-key/<model>` holding JSON with an `api_key` field. |
+| `use_eventbridge_scheduler` | Terminate the instance when the TTL expires via EventBridge Scheduler, which still fires if the instance is wedged. Set `ttl_minutes = 0` to disable. |
+
+The key is never written to the boot log, the process list, or `docker inspect` — it
+reaches the container through a `0600` `--env-file`. To read it back:
+
+```bash
+terraform output api_key
+```
+
 ## Why Not SageMaker / Bedrock
 
 Strata's architecture needs:

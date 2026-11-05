@@ -40,7 +40,17 @@ locals {
     StrataModel = var.model
   })
 
-  api_key = var.api_key != "" ? var.api_key : "strata-change-me-${substr(md5(timestamp()), 0, 12)}"
+  # Stable across plans: random_password is stored in state, so the key no longer
+  # rotates on every plan (timestamp() used to churn it, and the schedule with it).
+  api_key = var.api_key != "" ? var.api_key : random_password.api_key[0].result
+}
+
+# ─── API Key Generation ────────────────────────────────────────────────────────
+
+resource "random_password" "api_key" {
+  count   = var.api_key == "" ? 1 : 0
+  length  = 32
+  special = false
 }
 
 # ─── AMI Data Source (Deep Learning Base OSS AMI as fallback) ──────────────────
@@ -149,10 +159,14 @@ resource "aws_iam_instance_profile" "strata" {
 # ─── User Data (cloud-init) ───────────────────────────────────────────────────
 
 locals {
-  user_data = templatefile("${path.module}/modules/strata-ami/user_data/boot.sh.tpl", {
+  # CRLF-safe: a Windows working tree checks the template out with CR+LF, and a
+  # "#!/bin/bash\r" shebang would stop cloud-init from executing the script.
+  user_data = replace(templatefile("${path.module}/modules/strata-ami/user_data/boot.sh.tpl", {
     model_family         = var.model_family
     model                = var.model
-    api_key              = local.api_key
+    api_key              = var.use_secrets_manager ? "" : local.api_key
+    use_secrets_manager  = var.use_secrets_manager
+    secret_id            = local.api_key_secret_id
     context_length       = var.context_length
     kv_quantization      = var.kv_quantization
     vision_mode          = var.vision_mode
@@ -164,7 +178,7 @@ locals {
     health_check_timeout = var.health_check_timeout_seconds
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region
-  })
+  }), "\r\n", "\n")
 }
 
 # ─── Launch Template ───────────────────────────────────────────────────────────

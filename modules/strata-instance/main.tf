@@ -136,10 +136,12 @@ variable "tags" {
 locals {
   resolved_api_key = var.api_key != "" ? var.api_key : "strata-${substr(md5(var.model), 0, 16)}"
 
-  user_data = templatefile("${path.module}/../strata-ami/user_data/boot.sh.tpl", {
+  user_data = replace(templatefile("${path.module}/../strata-ami/user_data/boot.sh.tpl", {
     model_family         = var.model_family
     model                = var.model
     api_key              = local.resolved_api_key
+    use_secrets_manager  = false
+    secret_id            = ""
     context_length       = var.context_length
     kv_quantization      = var.kv_quantization
     vision_mode          = var.vision_mode
@@ -151,7 +153,7 @@ locals {
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
-  })
+  }), "\r\n", "\n")
 
   common_tags = merge(var.tags, {
     Project     = "strata-terraform"
