@@ -6,7 +6,16 @@ variable "name_prefix" {
 }
 
 variable "region" {
-  description = "AWS region to deploy in"
+  description = <<-EOT
+    The region this configuration is written down as targeting, e.g. "us-east-1". It does NOT
+    select the region resources land in - a reusable module must not configure an AWS provider, so
+    the region comes from the provider block in the caller's root module (or AWS_REGION). The
+    default matches us-east-1 because that is where the catalogue's prices and the verified GPU
+    availability were measured.
+
+    If this value and the provider's actual region disagree, the plan says so: a module input named
+    "region" that silently does nothing is the kind of thing that puts a stack in the wrong region.
+  EOT
   type        = string
   default     = "us-east-1"
 }

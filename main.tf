@@ -3,11 +3,10 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-data "aws_vpc" "selected" {
-  count = var.vpc_id != "" ? 1 : 0
-  id    = var.vpc_id
-}
-
+# There used to be a `data "aws_vpc" "selected"` here, gated on var.vpc_id != "". Nothing read it:
+# every consumer resolves the VPC through local.effective_vpc_id below, which uses var.vpc_id
+# directly and only asks for the default VPC when it is empty. A data source nobody reads still
+# costs a live DescribeVpcs call on every plan - and a IAM permission the module does not need.
 data "aws_vpc" "default" {
   count   = var.vpc_id == "" ? 1 : 0
   default = true

@@ -83,6 +83,18 @@ resource "terraform_data" "container_knobs" {
 }
 
 
+# var.region used to be declared, described as "AWS region to deploy in", and read by nothing -
+# the root module has no provider block, because a reusable module must not configure providers.
+# The region therefore comes from the caller's provider (or AWS_REGION) and a caller who set
+# region = "eu-west-1" here would have created everything wherever the provider pointed, with no
+# indication that their input was inert. Warn instead of lying quietly.
+check "region_matches_provider" {
+  assert {
+    condition     = var.region == data.aws_region.current.region
+    error_message = "var.region is \"${var.region}\" but the AWS provider is configured for \"${data.aws_region.current.region}\". Nothing will be created in var.region: set the region on the provider \"aws\" block in your root module (or AWS_REGION), and treat this variable as documentation of where the catalogue's prices were measured."
+  }
+}
+
 # Upstream publishes both moving tags (latest-cuda13) and pinned ones (0.2.9-cuda13, and per
 # backend: -cuda12, -rocm-gfx*, -sycl). A moving tag means two boots of this exact configuration
 # can run different engine builds. That matters more here than in a typical deployment: the
