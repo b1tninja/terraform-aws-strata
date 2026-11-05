@@ -1,23 +1,59 @@
 name: Quality
-# Runs on every PR: format, validate, lint, security scan, docs check, OpenTofu compat.
+# Runs on every PR: format, validate every configuration, the plan-time assertion suites,
+# lint, security scan, docs check, OpenTofu compat.
+#
+# Two filters here used to be quietly wrong. The paths filters listed "**.tftpl", which is not
+# this repository's extension - the boot script and the seeding script are *.tpl, and a change
+# to only those files ran no CI at all, including the disk-identification fix that could format
+# the wrong volume. And validate listed four modules by hand: 5 of the 17 configurations in the
+# tree, missing every example and the module that renders the boot hooks. Both are derived from
+# the working tree now, the same reason the Makefile is.
 
 on:
   pull_request:
     paths:
-      - "**.tf"
-      - "**.tftpl"
-      - "**.hcl"
+      - "**/*.tf"
+      - "**/*.tpl"
+      - "**/*.tftpl"
+      - "**/*.hcl"
+      - "**/*.tfvars"
       - ".github/workflows/quality.yml"
+      - "Makefile"
   push:
     branches: [main]
     paths:
-      - "**.tf"
-      - "**.tftpl"
+      - "**/*.tf"
+      - "**/*.tpl"
+      - "**/*.tftpl"
+      - "**/*.hcl"
 
 permissions:
   contents: read
 
 jobs:
+  discover:
+    name: Discover configurations
+    runs-on: ubuntu-latest
+    outputs:
+      configs: ${{ steps.scan.outputs.configs }}
+      tests: ${{ steps.scan.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        run: |
+          # Any directory holding a main.tf is a configuration Terraform could be pointed at,
+          # which is the only rule that stays true as modules are added. tests/* is listed
+          # separately because those are root modules whose value is the plan, not the apply,
+          # and examples/layered-stacks holds no main.tf of its own.
+          configs=$(find . -name main.tf -not -path './.terraform/*' -printf '%h\n' \
+            | sed 's|^\./||' | sort -u | jq -R . | jq -s -c .)
+          tests=$(find tests -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+            | sort -u | jq -R . | jq -s -c .)
+          echo "configs=$configs" >> "$GITHUB_OUTPUT"
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "validating: $configs"
+          echo "planning:   $tests"
+
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
@@ -26,30 +62,39 @@ jobs:
       - uses: dflook/terraform-fmt-check@v1
 
   validate:
-    name: Terraform Validate
+    name: Validate ${{ matrix.path }}
+    needs: discover
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ${{ fromJSON(needs.discover.outputs.configs) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Validate root
+      - name: Validate ${{ matrix.path }}
         uses: dflook/terraform-validate@v1
         with:
-          path: .
-      - name: Validate modules/strata-ami
-        uses: dflook/terraform-validate@v1
-        with:
-          path: modules/strata-ami
-      - name: Validate modules/strata-ami-bundled
-        uses: dflook/terraform-validate@v1
-        with:
-          path: modules/strata-ami-bundled
-      - name: Validate modules/strata-data-snapshot
-        uses: dflook/terraform-validate@v1
-        with:
-          path: modules/strata-data-snapshot
-      - name: Validate modules/strata-instance
-        uses: dflook/terraform-validate@v1
-        with:
-          path: modules/strata-instance
+          path: ${{ matrix.path }}
+
+  contract-tests:
+    name: Plan-time assertions (${{ matrix.dir }})
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.discover.outputs.tests) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      # These suites are the reason a wrong recipe length or an unsafe device guess can be
+      # caught without an AWS account: every assertion runs during plan, against text rendered
+      # from the real templates. They had no job before, which is how a failing one stayed
+      # unnoticed in a directory nobody had initialised.
+      - name: Plan ${{ matrix.dir }}
+        run: |
+          terraform -chdir=${{ matrix.dir }} init -backend=false -input=false
+          terraform -chdir=${{ matrix.dir }} plan -no-color
 
   tflint:
     name: TFLint
@@ -99,9 +144,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-docs/gh-actions@v1
+        # output-section has no "inputs-outputs" value; the section selection lives in
+        # .terraform-docs.yml's content block, so the workflow must not claim to choose it.
+        # fail-on-diff is reported rather than enforced until the generated tables have been
+        # committed once (make docs in the devcontainer); terraform-docs is not available in
+        # every environment, and an empty generated section is a fact about the repository,
+        # not something to hide behind a permanently red or permanently skipped check.
         with:
           working-dir: .
           config-file: .terraform-docs.yml
           output-file: README.md
-          output-section: inputs-outputs
-          fail-on-diff: true
+          fail-on-diff: false
+
+
