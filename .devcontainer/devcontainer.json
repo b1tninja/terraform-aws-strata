@@ -6,7 +6,8 @@
       "version": "latest",
       "tflint": "latest",
       "installTFsec": true,
-      "installTerraformDocs": true
+      "installTerraformDocs": true,
+      "terraformDocsVersion": "0.20.0"
     },
     "ghcr.io/devcontainers/features/aws-cli:1": {
       "version": "latest"

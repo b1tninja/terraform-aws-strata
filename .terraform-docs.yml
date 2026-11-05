@@ -1,6 +1,11 @@
-# Validated against terraform-docs v0.24.0. The shape matters: "formatter" is a plain string
-# naming the formatter, and its options live in the top-level "settings" map, where "lockfile" is
-# a boolean (use the lock file to resolve provider versions), not a path.
+# Validated with terraform-docs v0.20.0 - the version terraform-docs/gh-actions@v1.4.1 bundles and
+# the version CI therefore runs, and the version .devcontainer/devcontainer.json installs. Keep all
+# three on the same number: the generated markdown is compared byte for byte in CI, and the table
+# rules differ across versions (0.20.0 emits "|------|", 0.24.0 emits "| ---- |").
+#
+# The shape matters: "formatter" is a plain string naming the formatter, and its options live in
+# the top-level "settings" map, where "lockfile" is a boolean (use the lock file to resolve
+# provider versions), not a path.
 #
 # The file this replaces nested type/settings under "formatter" and listed "hide" as a sequence.
 # terraform-docs refused it outright:

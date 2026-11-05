@@ -144,9 +144,13 @@ See [docs/MODELS.md](docs/MODELS.md) for model → instance mapping.
 ```
 terraform-aws-strata/
 ├── main.tf                  # Root module (instance + networking + IAM)
-├── variables.tf             # All configuration options
+├── variables.tf             # Configuration options for the root module
+├── variables-bundled.tf     # Options that only mean something with a bundled AMI
+├── preflight.tf             # Plan-time assertions and advice (fails a plan, or warns before it)
+├── security-scheduler.tf    # API key in Secrets Manager; EventBridge job that ends an instance at TTL
 ├── outputs.tf               # Endpoint, IPs, IDs
 ├── versions.tf              # Provider constraints
+├── Makefile                 # init / validate / test-all / docs / quality (directories are derived)
 ├── modules/
 │   ├── strata-ami/             # EC2 Image Builder pipeline
 │   ├── strata-ami-bundled/     # AMI with the weights volume baked in
@@ -163,7 +167,14 @@ terraform-aws-strata/
 │   ├── nvfp4-uncensored/       # One model, two behaviours, per request
 │   ├── one-snapshot-two-configs/ # Same volume, different serving settings
 │   └── layered-stacks/         # base + uncensored as separate states
+├── tests/                  # Assertion suites: they render the real templates through the same
+│   ├── boot_disk/          #   code paths the module uses, and fail if a guarantee the README
+│   ├── boot_hooks/         #   claims is not actually present in the rendered output
+│   ├── catalog/
+│   └── instance_store/
+├── setup/oidc/             # GitHub → AWS OIDC roles (applied once, by hand)
 ├── .github/workflows/
+│   ├── quality.yml          # fmt + validate + lint + security + docs + every assertion suite
 │   ├── build-ami.yml        # Rebuild AMI (weekly/manual)
 │   ├── refresh-weights.yml  # Download model → snapshot → FSR
 │   ├── deploy-ephemeral.yml # Deploy → test → report
@@ -171,10 +182,12 @@ terraform-aws-strata/
 ├── scripts/
 │   ├── wait-healthy.sh      # Poll /health until loaded
 │   └── teardown.sh          # Safe destroy wrapper
-└── docs/
-    ├── ARCHITECTURE.md      # How it works, why not SageMaker
-    ├── COST.md              # Pricing scenarios
-    └── MODELS.md            # Model → instance mapping
+├── docs/
+│   ├── ARCHITECTURE.md      # How it works, why not SageMaker
+│   ├── COST.md              # Pricing scenarios
+│   └── MODELS.md            # Model → instance mapping
+├── .devcontainer/           # terraform, tflint, tfsec, terraform-docs 0.20.0, aws-cli
+└── CONTRIBUTING.md          # What to run before opening a pull request
 ```
 
 ## GitHub Actions
@@ -236,17 +249,20 @@ Strata's architecture needs:
 
 None of which managed inference platforms support. Raw EC2 gives full hardware control.
 
-## License
+## Reference
 
-MIT — see [LICENSE](LICENSE). Model weights are governed by their respective licenses (Qwen, DeepSeek, etc.).
-
-## Inputs and Outputs
+_The section between the markers below is generated from the module source by `make docs`
+(terraform-docs **0.20.0** - the version `terraform-docs/gh-actions@v1.4.1` bundles, and the one
+`.devcontainer/devcontainer.json` installs, because CI compares this section byte for byte and
+different versions format the table rules differently: 0.20.0 writes `|------|`, 0.24.0 writes
+`| ---- |`). Nothing between the markers is hand-written and nothing there should be edited by
+hand; it is rewritten in place._
 
 <!-- BEGIN_TF_DOCS -->
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_allowed_cidr_blocks"></a> [allowed\_cidr\_blocks](#input\_allowed\_cidr\_blocks) | CIDR blocks allowed to access the Strata API port | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | Pre-built AMI ID with Strata baked in. If empty, uses the latest Deep Learning AMI and installs on first boot. | `string` | `""` | no |
 | <a name="input_api_key"></a> [api\_key](#input\_api\_key) | API key for the Strata server. Auto-generated if empty. | `string` | `""` | no |
@@ -292,7 +308,7 @@ MIT — see [LICENSE](LICENSE). Model weights are governed by their respective l
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_anthropic_endpoint"></a> [anthropic\_endpoint](#output\_anthropic\_endpoint) | Anthropic-compatible API endpoint URL |
 | <a name="output_api_endpoint"></a> [api\_endpoint](#output\_api\_endpoint) | OpenAI-compatible API endpoint URL |
 | <a name="output_api_key"></a> [api\_key](#output\_api\_key) | API key for the endpoint (null when it comes from a pre-existing Secrets Manager secret) |
@@ -311,13 +327,13 @@ MIT — see [LICENSE](LICENSE). Model weights are governed by their respective l
 ## Modules
 
 | Name | Source | Version |
-| ---- | ------ | ------- |
+|------|--------|---------|
 | <a name="module_catalog"></a> [catalog](#module\_catalog) | ./modules/strata-catalog | n/a |
 
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [aws_ebs_fast_snapshot_restore.weights](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ebs_fast_snapshot_restore) | resource |
 | [aws_iam_instance_profile.strata](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
 | [aws_iam_role.scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -361,4 +377,10 @@ make quality       # fmt + validate everything + lint + security + docs-check + 
 make help          # List all targets
 ```
 
-Requires: `terraform` (or `tofu`), `tflint`, `trivy`, `terraform-docs`.
+Requires: `terraform` (or `tofu`), `tflint`, `trivy`, and `terraform-docs` **0.20.0** — the version
+CI runs. A newer one regenerates the tables with different rule formatting and fails the docs
+check, which is the check working, not the check being fussy.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Model weights are governed by their respective licenses (Qwen, DeepSeek, etc.).

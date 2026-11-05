@@ -146,15 +146,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: terraform-docs/gh-actions@v1
-        # fail-on-diff is enforced again: the generated tables are now committed, and
-        # `terraform-docs . --config .terraform-docs.yml --output-mode verify` exits 0 against
-        # them. With the old invalid config the tool never parsed this file, so the section was
-        # always empty and enforcing it would have failed every run for the wrong reason.
+      - uses: terraform-docs/gh-actions@v1.4.1
+        # Pinned to the patch tag deliberately. The action has no "version" input - its README
+        # states "v1.4.1 (uses terraform-docs v0.20.0)", so the action tag IS the generator pin,
+        # and "@v1" would float to whatever the newest v1.x bakes in. This job fails on a diff and
+        # the committed tables were written by 0.20.0, so a floating generator turns the check red
+        # the day upstream changes its markdown, for reasons unrelated to the pull request.
+        # .devcontainer/devcontainer.json pins terraformDocsVersion to the same 0.20.0.
         with:
           working-dir: .
           config-file: .terraform-docs.yml
           output-file: README.md
+          # Per the action's own input docs: leave these empty when the config file already
+          # defines output.mode / output.file / output.template, so its defaults are not layered
+          # on top of ours.
+          output-method: ""
+          template: ""
           fail-on-diff: true
 
 
