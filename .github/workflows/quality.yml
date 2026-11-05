@@ -64,8 +64,12 @@ jobs:
           # and examples/layered-stacks holds no main.tf of its own.
           configs=$(find . -name main.tf -not -path './.terraform/*' -printf '%h\n' \
             | sed 's|^\./||' | sort -u | jq -R . | jq -s -c .)
-          tests=$(find tests -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
-            | sort -u | jq -R . | jq -s -c .)
+          # %p, not %f: %f prints "boot_disk" and the job then runs `terraform -chdir=boot_disk`,
+          # a directory that does not exist. The suites passed locally because the make target and
+          # the verification loop both prefixed "tests/" themselves, so nothing here agreed with
+          # anything else - the matrix was the only thing that got the path wrong, and only in CI.
+          tests=$(find tests -mindepth 1 -maxdepth 1 -type d -printf '%p\n' \
+            | sed 's|^\./||' | sort -u | jq -R . | jq -s -c .)
           echo "configs=$configs" >> "$GITHUB_OUTPUT"
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
           echo "validating: $configs"
@@ -131,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .
