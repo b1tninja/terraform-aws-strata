@@ -53,6 +53,21 @@ resource "random_password" "api_key" {
   special = false
 }
 
+# ─── Catalog (model sizes, instance support, volume sizing) ─────────────────────
+
+module "catalog" {
+  source = "./modules/strata-catalog"
+
+  model         = var.model
+  model_family  = var.model_family
+  instance_type = var.instance_type
+}
+
+locals {
+  # An explicit data_volume_size always wins; otherwise it comes from the model.
+  data_volume_size = coalesce(var.data_volume_size, try(module.catalog.recommended_volume_gib, null), 250)
+}
+
 # ─── AMI Data Source (Deep Learning Base OSS AMI as fallback) ──────────────────
 
 data "aws_ami" "dlami" {
@@ -213,7 +228,7 @@ resource "aws_launch_template" "strata" {
       device_name = "/dev/sdb"
       ebs {
         snapshot_id           = var.weights_snapshot_id
-        volume_size           = var.data_volume_size
+        volume_size           = local.data_volume_size
         volume_type           = "gp3"
         iops                  = var.provisioned_iops
         throughput            = var.provisioned_throughput
@@ -231,7 +246,7 @@ resource "aws_launch_template" "strata" {
     content {
       device_name = var.bundled_data_volume_device
       ebs {
-        volume_size           = var.data_volume_size
+        volume_size           = local.data_volume_size
         volume_type           = "gp3"
         iops                  = var.provisioned_iops
         throughput            = var.provisioned_throughput
@@ -248,7 +263,7 @@ resource "aws_launch_template" "strata" {
     content {
       device_name = "/dev/sdb"
       ebs {
-        volume_size           = var.data_volume_size
+        volume_size           = local.data_volume_size
         volume_type           = "gp3"
         iops                  = var.provisioned_iops
         throughput            = var.provisioned_throughput

@@ -1,7 +1,7 @@
 # strata-terraform Makefile
 # All targets work inside the devcontainer or locally with tools installed.
 
-.PHONY: help init fmt validate lint docs security quality test-all tofu-validate clean
+.PHONY: help init fmt validate lint docs security quality test-all tofu-validate clean catalog-test
 
 TF ?= terraform
 TOFU ?= tofu
@@ -17,11 +17,13 @@ init: ## terraform init (all modules + examples)
 	$(TF) init -backend=false
 	cd modules/strata-ami && $(TF) init -backend=false
 	cd modules/strata-ami-bundled && $(TF) init -backend=false
+	cd modules/strata-catalog && $(TF) init -backend=false
 	cd modules/strata-data-snapshot && $(TF) init -backend=false
 	cd modules/strata-instance && $(TF) init -backend=false
 	cd examples/ephemeral-on-demand && $(TF) init -backend=false
 	cd examples/spot-fleet && $(TF) init -backend=false
 	cd examples/full-pipeline && $(TF) init -backend=false
+	$(TF) -chdir=tests/catalog init -backend=false
 
 fmt: ## Format all Terraform files
 	$(TF) fmt -recursive
@@ -33,11 +35,15 @@ validate: ## Validate all modules and examples
 	$(TF) validate
 	cd modules/strata-ami && $(TF) validate
 	cd modules/strata-ami-bundled && $(TF) validate
+	cd modules/strata-catalog && $(TF) validate
 	cd modules/strata-data-snapshot && $(TF) validate
 	cd modules/strata-instance && $(TF) validate
 	cd examples/ephemeral-on-demand && $(TF) validate
 	cd examples/spot-fleet && $(TF) validate
 	cd examples/full-pipeline && $(TF) validate
+
+catalog-test: ## Assert the model/instance catalog by planning tests/catalog (no AWS creds)
+	$(TF) -chdir=tests/catalog plan -no-color
 
 lint: ## Run tflint on all modules
 	$(TFLINT) --init
@@ -52,7 +58,7 @@ security: ## Trivy IaC misconfiguration scan
 tofu-validate: ## Validate with OpenTofu (drop-in replacement)
 	$(TOFU) init -backend=false && $(TOFU) validate
 
-quality: fmt-check validate lint security docs ## Run all quality checks
+quality: fmt-check validate lint security docs catalog-test ## Run all quality checks
 
 clean: ## Remove .terraform directories and state files
 	find . -name .terraform -type d -exec rm -rf {} + 2>/dev/null || true

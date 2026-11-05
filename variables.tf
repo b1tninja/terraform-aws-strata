@@ -82,15 +82,21 @@ variable "strata_image_tag" {
 
 # ─── Model / Data ─────────────────────────────────────────────────────────────
 variable "model" {
-  description = "Strata model identifier (e.g. IQ3_XXS, Q2_0, IQ2_XS, UD-Q6_K_XL)"
+  description = "Strata model identifier (e.g. IQ3_XXS, Q2_0, IQ2_XS, UD-Q6_K_XL, NVFP4). The catalog in modules/strata-catalog lists every accepted value and derives the volume size from it."
   type        = string
   default     = "IQ3_XXS"
 }
 
 variable "model_family" {
-  description = "Model family (qwen, deepseek41, coder, swift, gyro)"
+  description = "Model family: qwen, swift, coder, unsloth, gyro, nvfp4 or deepseek41"
   type        = string
   default     = "qwen"
+}
+
+variable "strict_catalog" {
+  description = "Fail the plan when model or model_family is not in modules/strata-catalog. Turn it off to deploy a size the catalog has not been updated for yet."
+  type        = bool
+  default     = true
 }
 
 variable "weights_snapshot_id" {
@@ -100,9 +106,9 @@ variable "weights_snapshot_id" {
 }
 
 variable "data_volume_size" {
-  description = "Size of the /data volume in GiB (must fit model weights)"
+  description = "Size of the /data volume in GiB. When unset it is derived from the model's download size plus headroom (see modules/strata-catalog)."
   type        = number
-  default     = 250
+  default     = null
 }
 
 variable "enable_fast_snapshot_restore" {

@@ -45,11 +45,24 @@ After that, every deployment is just `terraform apply` → ready in 90s.
 
 ## Supported Instances
 
+Published engine packages contain code for **sm_75, sm_80, sm_86, sm_89 and sm_120**
+only, so the biggest AWS GPUs are not the safest choice — an unsupported card exits
+before loading a model.
+
 | Family | GPU | Compute Capability | Status |
 |--------|-----|-------------------|--------|
-| `g6e.*` | NVIDIA L40S (48GB) | 8.9 (Ada) | ✅ Recommended |
+| `g7e.*` | NVIDIA RTX PRO 6000 Blackwell (96GB) | 12.0 | ✅ Best for NVFP4 (FP4 tensor cores) |
+| `g7.*` | NVIDIA RTX PRO 4500 Blackwell (32GB) | 12.0 | ✅ FP4, cheapest spot price |
+| `g6e.*` | NVIDIA L40S (48GB) | 8.9 (Ada) | ✅ Recommended for the Qwen quants |
 | `g6.*` | NVIDIA L4 (24GB) | 8.9 (Ada) | ✅ Works |
 | `g5.*` | NVIDIA A10G (24GB) | 8.6 (Ampere) | ✅ Works |
+| `p5.*` `p5e.*` `p5en.*` | H100 / H200 | 9.0 (Hopper) | ❌ No engine package |
+| `p6-b200.*` `p6-b300.*` `p6e-gb200.*` | B200 / B300 / GB200 | 10.x | ❌ No engine package |
+| `g5g.*` | Graviton + GPU | arm64 | ❌ Images are x86-64, need AVX2 |
+
+Set `model` and `instance_type`; `data_volume_size` derives from the model
+automatically, and a combination that cannot work fails at `terraform plan`
+(`modules/strata-catalog`, asserted in `tests/catalog`).
 
 See [docs/MODELS.md](docs/MODELS.md) for model → instance mapping.
 
