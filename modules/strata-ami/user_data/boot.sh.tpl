@@ -28,6 +28,10 @@ TTL_MINUTES=${ttl_minutes}
 REGION="${region}"
 IMDS_TOKEN=""
 
+# How much to trust the restored volume: off, sizes (compare recorded sizes, a stat per
+# file), or full (re-hash everything, minutes on a 128 GB pack).
+VERIFY_WEIGHTS="${verify_weights}"
+
 
 
 # ─── Mount data volume ─────────────────────────────────────────────────────────
@@ -55,6 +59,56 @@ else
 fi
 
 grep -q "$DATA_DEVICE" /etc/fstab || echo "$DATA_DEVICE $DATA_MOUNT ext4 defaults,noatime 0 2" >> /etc/fstab
+
+# ─── Does the volume still hold what it was seeded with? ─────────────────────────
+# Cheap by default: one stat per file, which catches a truncated or missing file after a
+# restore. "full" re-hashes and costs minutes, so ask for it deliberately. Either way the
+# boot fails rather than starting an engine on a model that is not whole, which is the
+# expensive outcome - a healthy-looking endpoint quietly serving garbage for the hour.
+#
+# The manifest covers the model data only: run settings under install/ and everything under
+# state/ are edited during normal operation, including by a boot hook, so they are not
+# seeded bytes and are not checked here.
+MANIFEST="$DATA_MOUNT/.strata-manifest/files.txt"
+if [ "$VERIFY_WEIGHTS" = "off" ]; then
+  echo "  verify_weights = off: trusting the volume as restored."
+elif [ ! -f "$MANIFEST" ]; then
+  echo "  No manifest on this volume (seeded by an older snapshot, or prepared by hand)."
+  echo "  Nothing to compare against, so continuing."
+else
+  v_checked=0
+  v_missing=0
+  v_wrongsize=0
+  v_badhash=0
+  while read -r want size path; do
+    if [ -z "$path" ]; then continue; fi
+    if [ ! -f "$DATA_MOUNT/$path" ]; then
+      echo "  MISSING  $path"
+      v_missing=$((v_missing + 1))
+      continue
+    fi
+    actual=$(stat -c %s "$DATA_MOUNT/$path")
+    if [ "$actual" != "$size" ]; then
+      echo "  SIZE     $path: seeded at $size, volume has $actual"
+      v_wrongsize=$((v_wrongsize + 1))
+      continue
+    fi
+    v_checked=$((v_checked + 1))
+    if [ "$VERIFY_WEIGHTS" = "full" ]; then
+      if ! printf '%s  %s\n' "$want" "$path" | (cd "$DATA_MOUNT" && sha256sum --check --status -); then
+        echo "  HASH     $path does not match its seeded digest"
+        v_badhash=$((v_badhash + 1))
+      fi
+    fi
+  done < "$MANIFEST"
+
+  echo "  Weights verified ($VERIFY_WEIGHTS): $v_checked whole, $v_missing missing, $v_wrongsize wrong size, $v_badhash bad digest."
+  if [ $((v_missing + v_wrongsize + v_badhash)) -gt 0 ]; then
+    echo "ERROR: the weights volume does not match what was seeded into it."
+    echo "       Boot a fresh volume from the snapshot, or set verify_weights = \"off\" to run it anyway."
+    exit 1
+  fi
+fi
 
 # ─── Ensure Docker + nvidia-container-toolkit ──────────────────────────────────
 echo "[2/6] Checking runtime prerequisites..."

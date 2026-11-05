@@ -214,6 +214,31 @@ variable "gpu_roles" {
   default     = ""
 }
 
+variable "verify_weights" {
+  description = <<-EOT
+    How carefully the boot checks the weights volume against the manifest written when the
+    snapshot was seeded: "off", "sizes" (default) or "full".
+
+    "sizes" compares each recorded file size, which costs one stat per file and catches
+    what actually goes wrong in practice - a truncated or missing file after a restore.
+    "full" re-hashes every byte against the seeded SHA-256, which is minutes on a 128 GB
+    pack: worth running once per snapshot, or when an instance behaves oddly, not on every
+    boot. Either mode fails the boot rather than serving a model that is not whole.
+
+    This covers storage after the install. The download itself is verified by Strata's own
+    installer, which pins a SHA-256 and a size per file (see docs/SAFETY.md upstream), and
+    a volume with no manifest - one prepared by hand, or an older snapshot - is reported
+    and booted anyway, because there is nothing to compare it against.
+
+    Scope is the model data. The run settings under install/ and everything under state/
+    are excluded, because they are edited during normal operation - tuning rewrites them,
+    and a boot hook records engine arguments there - so a manifest that watched them would
+    fail every boot and only teach people to turn this off.
+  EOT
+  type        = string
+  default     = "sizes"
+}
+
 variable "boot_hooks" {
   description = <<-EOT
     Shell fragments to splice into the boot script, in order, after the model reports

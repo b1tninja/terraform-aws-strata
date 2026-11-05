@@ -194,6 +194,7 @@ locals {
     parallel             = var.parallel
     gpus                 = var.gpus
     gpu_roles            = var.gpu_roles
+    verify_weights       = var.verify_weights
     health_check_timeout = var.health_check_timeout_seconds
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region

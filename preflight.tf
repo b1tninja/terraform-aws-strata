@@ -82,3 +82,17 @@ resource "terraform_data" "container_knobs" {
   }
 }
 
+
+# The verification mode is read by the boot script, so a typo would mean the check silently
+# does the wrong thing on every instance built from this configuration.
+resource "terraform_data" "verify_weights" {
+  input = var.verify_weights
+
+  lifecycle {
+    precondition {
+      condition     = contains(["off", "sizes", "full"], var.verify_weights)
+      error_message = "verify_weights must be \"off\", \"sizes\" or \"full\". Anything else is compared literally by the boot script, so it would fall through to the sizes pass while looking like something else."
+    }
+  }
+}
+

@@ -154,7 +154,8 @@ The production instance gets BOTH volumes from the AMI's BDM — no separate
 | FSR credits exhausted (quota: 5/region) | Provisioned Rate fallback (300 MiB/s ≈ 11 min) |
 | Spot interruption | TTL-based relaunch; FSR makes next instance equally fast |
 | AMI stale (new Strata release) | Weekly rebuild workflow + `strata_image_tag` variable |
-| Corrupted model on snapshot | SHA-256 check in boot script before starting |
+| Corrupted weights on a volume | Sizes verified against the seeded manifest at every boot (`verify_weights`; `full` re-hashes), before the container starts. The download itself is checked by Strata's installer, which pins a SHA-256 per file |
+| Snapshot that no longer matches | `sha256sum` digests recorded in `.strata-manifest/files.txt` when the snapshot is built, so drift is detectable rather than assumed |
 | AZ capacity unavailable | Change `availability_zone` variable + re-enable FSR in new AZ |
 
 | Multi-tier expert offload (GPU+CPU+RAM+SSD) | No | No | Yes |

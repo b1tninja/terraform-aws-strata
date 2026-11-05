@@ -60,6 +60,51 @@ if [ ! -d "$DATA_DIR/Strata-data" ] && [ ! -d "$DATA_DIR/models" ]; then
     /opt/strata/terminal/setup.py --data-dir /data --model "$MODEL" --no-start
 fi
 
+# ─── Record what this volume now holds ───────────────────────────────────────────
+# Strata's own installer checks every file against the SHA-256 it pins (docs/SAFETY.md:
+# "Every model file has a fixed SHA-256 and size, and an install stops if the pinned
+# version of a file is gone"), so the download is covered. What that check cannot cover is
+# everything after it: the snapshot, every restore from it, and a volume that outlives
+# dozens of instances. The manifest below is what a boot compares against, so a truncated
+# or altered file is caught before an engine spends minutes loading it and then serves
+# garbage from it.
+#
+# Format: "<sha256>  <bytes>  <path relative to the volume root>", sorted.
+#
+# Scope is the model data, and the exclusions are deliberate rather than tidy-ups:
+#   state/     the API key and logs, which differ per instance
+#   install/   the run settings, which are edited on purpose - tuning rewrites them, and a
+#              boot hook records engine arguments there - so verifying them would fail
+#              every boot after the first and teach people to set verify_weights = "off"
+#   *.log      written as the instance runs
+# A file that is legitimately rewritten must not be in a manifest that gates the boot.
+MANIFEST_DIR="$DATA_DIR/.strata-manifest"
+rm -rf "$MANIFEST_DIR"
+mkdir -p "$MANIFEST_DIR"
+
+echo "Writing the integrity manifest (one pass over the weights)..."
+(
+  cd "$DATA_DIR" || exit 1
+  : > "$MANIFEST_DIR/files.txt"
+  while IFS= read -r -d '' f; do
+    digest=$(sha256sum "$f" | cut -d' ' -f1)
+    size=$(stat -c %s "$f")
+    printf '%s  %s  %s\n' "$digest" "$size" "$f" >> "$MANIFEST_DIR/files.txt"
+  done < <(find . -type f \
+    -not -path './.strata-manifest/*' \
+    -not -path './state/*' \
+    -not -path './install/*' \
+    -not -name '*.log' \
+    -print0 | sort -z)
+)
+
+MANIFEST_FILES=$(wc -l < "$MANIFEST_DIR/files.txt" | tr -d ' ')
+MANIFEST_BYTES=$(awk '{ total += $2 } END { printf "%d", total }' "$MANIFEST_DIR/files.txt")
+printf 'created=%s model=%s family=%s files=%s bytes=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODEL" "$FAMILY" "$MANIFEST_FILES" "$MANIFEST_BYTES" \
+  > "$MANIFEST_DIR/manifest.info"
+cat "$MANIFEST_DIR/manifest.info"
+
 # Sync to disk
 sync
 df -h "$DATA_DIR"

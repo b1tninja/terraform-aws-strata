@@ -150,6 +150,12 @@ variable "gpu_roles" {
   default     = ""
 }
 
+variable "verify_weights" {
+  description = "How carefully the boot checks the weights volume against the seeded manifest: off, sizes (default, one stat per file) or full (re-hash everything, minutes). Volumes with no manifest are reported and booted anyway."
+  type        = string
+  default     = "sizes"
+}
+
 variable "boot_hooks" {
   description = "Shell fragments to splice into the boot script after the model is healthy; see the root module's variable of the same name for the contract hooks rely on."
   type        = list(string)
@@ -184,6 +190,7 @@ locals {
     parallel             = var.parallel
     gpus                 = var.gpus
     gpu_roles            = var.gpu_roles
+    verify_weights       = var.verify_weights
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
