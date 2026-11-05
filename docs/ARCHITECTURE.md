@@ -112,7 +112,7 @@ module "bundled_ami" {
 
 # Every deploy (minutes, repeatable):
 module "strata" {
-  source           = "github.com/b1tninja/strata-terraform"
+  source           = "github.com/b1tninja/terraform-aws-strata"
   use_bundled_ami  = true
   ami_id           = module.bundled_ami.ami_id
   instance_type    = "g6e.8xlarge"

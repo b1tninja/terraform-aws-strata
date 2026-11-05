@@ -1,4 +1,4 @@
-# strata-terraform
+# terraform-aws-strata
 
 Deploy [Strata](https://github.com/Niko1221/Strata) on AWS EC2 GPU instances with **instant cold-start** — from zero to serving in ~90 seconds.
 
@@ -19,7 +19,7 @@ terraform apply → wait 90s → POST /v1/chat/completions → terraform destroy
 
 ```hcl
 module "strata" {
-  source = "github.com/b1tninja/strata-terraform"
+  source = "github.com/b1tninja/terraform-aws-strata"
 
   instance_type    = "g6e.8xlarge"
   model            = "IQ3_XXS"
@@ -56,7 +56,7 @@ See [docs/MODELS.md](docs/MODELS.md) for model → instance mapping.
 ## Repository Structure
 
 ```
-strata-terraform/
+terraform-aws-strata/
 ├── main.tf                  # Root module (instance + networking + IAM)
 ├── variables.tf             # All configuration options
 ├── outputs.tf               # Endpoint, IPs, IDs

@@ -1,4 +1,4 @@
-# Contributing to strata-terraform
+# Contributing to terraform-aws-strata
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ This repo follows the [Terraform Registry naming convention](https://developer.h
 terraform-<PROVIDER>-<NAME>
 ```
 
-For registry publishing, the GitHub repo should be named `terraform-aws-strata`. The folder can remain `strata-terraform` locally.
+The repo (and local folder) are named `terraform-aws-strata` so the module can be published to the Terraform Registry directly.
 
 ## Commit Convention
 
