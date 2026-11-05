@@ -24,6 +24,8 @@ init: ## terraform init (all modules + examples)
 	cd examples/spot-fleet && $(TF) init -backend=false
 	cd examples/full-pipeline && $(TF) init -backend=false
 	$(TF) -chdir=tests/catalog init -backend=false
+	$(TF) -chdir=tests/boot_hooks init -backend=false
+	$(TF) -chdir=tests/boot_disk init -backend=false
 
 fmt: ## Format all Terraform files
 	$(TF) fmt -recursive
@@ -47,9 +49,10 @@ validate: ## Validate all modules and examples
 	cd examples/layered-stacks/base && $(TF) validate
 	cd examples/layered-stacks/uncensored && $(TF) validate
 
-catalog-test: ## Assert the model/instance catalog by planning tests/catalog (no AWS creds)
+catalog-test: ## Plan-time assertions: catalog, boot hooks, boot disk identification (no AWS creds)
 	$(TF) -chdir=tests/catalog plan -no-color
 	$(TF) -chdir=tests/boot_hooks plan -no-color
+	$(TF) -chdir=tests/boot_disk plan -no-color
 
 lint: ## Run tflint on all modules
 	$(TFLINT) --init

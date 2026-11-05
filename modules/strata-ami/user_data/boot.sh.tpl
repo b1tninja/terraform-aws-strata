@@ -38,22 +38,88 @@ VERIFY_WEIGHTS="${verify_weights}"
 echo "[1/6] Mounting data volume..."
 mkdir -p "$DATA_MOUNT"
 
+# Which disk is the data volume? A fixed device name is not safe. On Nitro, the name given
+# in the launch template (/dev/sdb) is not the name the OS uses, and on instance-store types
+# (g4dn, g5, g6, g7, g7e, i3*, imgn*) the ephemeral disks are NVMe devices too and can take
+# /dev/nvme1n1. Guessing wrong is quietly expensive rather than loudly broken: the script
+# would mkfs the instance store, mount an empty /data, download the pack at GPU rates, and
+# leave the restored volume unmounted. Three signals, strongest first:
+#   1. filesystem label - the volume carries one: strata-weights from the seeding stage,
+#      strata-data from boots that formatted a volume before this existed. Both are accepted.
+#   2. disk model - EBS reports "Amazon Elastic Block Store", instance storage reports
+#      "Amazon EC2 NVMe Instance Storage". The root disk shares the EBS model, so it is
+#      excluded by asking the kernel what actually backs /.
+#   3. the name Terraform baked in, as a last resort on non-NVMe instances, and never if the
+#      kernel says that disk is instance storage.
+# Two candidates at step 2 is a real problem, not a reason to guess: the boot stops.
+find_data_device() {
+  local by_label inuse nd model candidate hits count
+  by_label=$(blkid -L strata-weights 2>/dev/null || blkid -L strata-data 2>/dev/null || true)
+  if [ -n "$by_label" ]; then realpath -m "$by_label"; return 0; fi
+  # Every disk already carrying a mount is spoken for: root, /boot, anything a previous
+  # step attached. Asking lsblk rather than trusting a name like /dev/nvme0n1p1 also
+  # survives images that report the root device as /dev/root.
+  inuse=$(lsblk -rnpo NAME,PKNAME,MOUNTPOINT 2>/dev/null | awk '$3 != "" {print ($2 == "" ? $1 : $2)}' | sort -u)
+  hits=""
+  count=0
+  for nd in /sys/class/nvme/nvme*; do
+    [ -e "$nd/device/model" ] || continue
+    model=$(tr -d '[:space:]' < "$nd/device/model" 2>/dev/null || echo "")
+    if [ "$model" = "AmazonElasticBlockStore" ]; then
+      candidate="/dev/$(basename "$nd")"
+      if ! printf '%s\n' "$inuse" | grep -qxF "$candidate"; then
+        # Built without brace expansion on purpose: a dollar-followed-by-brace form here
+        # would be read by Terraform as a template interpolation, since this file is rendered
+        # by templatefile() and it does not know about shell comments.
+        if [ -z "$hits" ]; then hits="$candidate"; else hits="$hits $candidate"; fi
+        count=$((count + 1))
+      fi
+    fi
+  done
+  if [ "$count" -eq 1 ]; then echo "$hits"; return 0; fi
+  if [ "$count" -gt 1 ]; then echo "ambiguous:$hits" >&2; return 2; fi
+  return 1
+}
+
+DATA_RESOLVED=""
+DISK_ERR=$(mktemp)
 for i in $(seq 1 30); do
-  if [ -b "$DATA_DEVICE" ]; then break; fi
-  if [ -b /dev/sdb ]; then DATA_DEVICE="/dev/sdb"; break; fi
+  if DATA_RESOLVED=$(find_data_device 2>"$DISK_ERR"); then break; fi
+  if grep -q ambiguous "$DISK_ERR" 2>/dev/null; then
+    echo "ERROR: more than one disk looks like the data volume:$(cat "$DISK_ERR" | sed -n 's/.*ambiguous//p')"
+    echo "       Refusing to format a disk this script is not certain about."
+    rm -f "$DISK_ERR"
+    exit 1
+  fi
+  # Late in the loop only: on Xen-style instances the NVMe model test finds nothing and the
+  # baked name is all there is, but attaching takes a moment so trying it immediately would
+  # race the attach and, worse, could land on an ephemeral disk named /dev/sdb.
+  if [ "$i" -ge 10 ]; then
+    for guess in "$DATA_DEVICE" /dev/sdb; do
+      if [ -b "$guess" ] && ! lsblk -dn -o NAME,MODEL "$guess" 2>/dev/null | grep -qi 'instance storage'; then
+        DATA_RESOLVED="$guess"
+        break
+      fi
+    done
+    [ -n "$DATA_RESOLVED" ] && break
+  fi
   sleep 2
 done
+rm -f "$DISK_ERR"
 
-if [ ! -b "$DATA_DEVICE" ]; then
-  echo "ERROR: Data device $DATA_DEVICE not found after 60s"
+if [ -z "$DATA_RESOLVED" ] || [ ! -b "$DATA_RESOLVED" ]; then
+  echo "ERROR: no data volume found after 60s (looked for a strata-weights/strata-data"
+  echo "       filesystem label, then for a non-root EBS NVMe disk, then $DATA_DEVICE)."
   exit 1
 fi
+DATA_DEVICE="$DATA_RESOLVED"
+echo "  Data volume identified as $DATA_DEVICE"
 
 if blkid "$DATA_DEVICE" &>/dev/null; then
   mount "$DATA_DEVICE" "$DATA_MOUNT"
   echo "  Mounted existing filesystem on $DATA_DEVICE at $DATA_MOUNT"
 else
-  mkfs.ext4 -L strata-data "$DATA_DEVICE"
+  mkfs.ext4 -L strata-weights "$DATA_DEVICE"
   mount "$DATA_DEVICE" "$DATA_MOUNT"
   echo "  Created new ext4 filesystem on $DATA_DEVICE at $DATA_MOUNT"
 fi

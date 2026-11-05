@@ -178,7 +178,12 @@ This is also why the weights manifest deliberately ignores `install/`.
 2. Volume snapshotted — the golden reference
 3. FSR enabled on snapshot × each target AZ
 4. On launch, block device mapping references the FSR snapshot
-5. Volume appears at `/dev/nvme1n1` with all blocks ready (no lazy load)
+5. The data volume is *identified*, not assumed. A fixed device name is unsafe on
+   instance-store types (`g4dn`, `g5`, `g6`, `g7`, `g7e`, `i3*`), where the ephemeral disks are
+   NVMe devices too and can take `/dev/nvme1n1`; the script looks for the `strata-weights`
+   (or legacy `strata-data`) filesystem label, then for the one EBS-modelled disk that is not
+   mounted, and stops rather than guess when two candidates remain. Blocks are all present
+   before use (no lazy load) — that part of FSR is what the check relies on.
 6. Cloud-init mounts `/data`, starts Docker container (`-v /data:/data`)
 7. Strata sees model files with `.done` markers → skips download
 8. Engine loads weights into RAM/VRAM tiers → serving in ~90s
