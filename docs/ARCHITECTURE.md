@@ -210,7 +210,7 @@ This is also why the weights manifest deliberately ignores `install/`.
 |---------|-----------|
 | FSR credits exhausted (quota: 5/region) | Provisioned Rate fallback (300 MiB/s ≈ 11 min) |
 | Spot interruption | TTL-based relaunch; FSR makes next instance equally fast |
-| AMI stale (new Strata release) | Weekly rebuild workflow + `strata_image_tag` variable |
+| AMI stale (new Strata release) | Weekly rebuild workflow; `strata_image_tag` is pinned (ghcr also publishes `latest-*`, which can change the engine under a pinned control vector and now warns at plan) |
 | Data volume mistaken for another disk | The disk is *identified*, not assumed: filesystem label, then EBS disk model, then (in the seeding stage) the volume id. An ambiguous match aborts instead of formatting, because a wrong guess does not fail loudly - it mounts an empty `/data` and downloads a 58-188 GB pack at GPU rates while the restored volume sits unmounted, or snapshots the wrong disk as the golden reference |
 | Corrupted weights on a volume | Sizes verified against the seeded manifest at every boot (`verify_weights`; `full` re-hashes), before the container starts. The download itself is checked by Strata's installer, which pins a SHA-256 per file |
 | Snapshot that no longer matches | `sha256sum` digests recorded in `.strata-manifest/files.txt` when the snapshot is built, so drift is detectable rather than assumed |

@@ -85,9 +85,9 @@ variable "enable_fsr" {
 }
 
 variable "strata_image_tag" {
-  description = "Strata image tag (used to derive the download command)"
+  description = "Strata image tag (used to derive the download command). Pinned by default; see the root module's variable of the same name."
   type        = string
-  default     = "latest-cuda13"
+  default     = "0.2.9-cuda13"
 }
 
 variable "tags" {

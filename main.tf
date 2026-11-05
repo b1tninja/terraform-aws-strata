@@ -198,6 +198,7 @@ locals {
     health_check_timeout = var.health_check_timeout_seconds
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region
+    min_driver_version   = var.min_driver_version
     boot_hooks           = var.boot_hooks
     pre_start_hooks      = var.pre_start_hooks
   }), "\r\n", "\n")

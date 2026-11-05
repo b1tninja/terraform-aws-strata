@@ -5,9 +5,9 @@ variable "name_prefix" {
 }
 
 variable "strata_image_tag" {
-  description = "Docker image tag to bake into the AMI"
+  description = "Docker image tag to bake into the AMI. Pinned by default; see the root module's variable of the same name for the tag list and why moving tags are avoided."
   type        = string
-  default     = "latest-cuda13"
+  default     = "0.2.9-cuda13"
 }
 
 variable "base_ami_owners" {

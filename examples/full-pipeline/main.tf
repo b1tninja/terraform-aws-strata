@@ -64,7 +64,7 @@ module "ami" {
   count  = var.build_ami ? 1 : 0
 
   name_prefix         = "strata-prod"
-  strata_image_tag    = "latest-cuda13"
+  strata_image_tag    = "0.2.9-cuda13" # pinned: see the root module's variable for why
   build_instance_type = "g6e.xlarge"
   subnet_id           = var.subnet_id
 

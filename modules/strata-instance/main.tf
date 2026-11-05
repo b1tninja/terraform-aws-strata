@@ -77,8 +77,9 @@ variable "api_key" {
 }
 
 variable "strata_image_tag" {
-  type    = string
-  default = "latest-cuda13"
+  description = "Image tag to pull at boot. Pinned by default; see the root module's variable of the same name for the tag list and why moving tags are avoided."
+  type        = string
+  default     = "0.2.9-cuda13"
 }
 
 variable "context_length" {
@@ -162,6 +163,12 @@ variable "boot_hooks" {
   default     = []
 }
 
+variable "min_driver_version" {
+  description = "Fail the boot if the NVIDIA driver is older than this dotted version (e.g. \"570.00\"); empty logs the version and continues. See the root module's variable of the same name."
+  type        = string
+  default     = ""
+}
+
 variable "pre_start_hooks" {
   description = "Shell fragments to splice into the boot script before the container starts; see the root module's variable of the same name for the narrower contract these hooks run under."
   type        = list(string)
@@ -200,6 +207,7 @@ locals {
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
+    min_driver_version   = var.min_driver_version
     boot_hooks           = var.boot_hooks
     pre_start_hooks      = var.pre_start_hooks
   }), "\r\n", "\n")

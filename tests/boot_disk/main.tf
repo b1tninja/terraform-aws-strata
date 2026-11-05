@@ -30,6 +30,7 @@ locals {
     health_check_timeout = 600
     ttl_minutes          = 0
     region               = "us-east-1"
+    min_driver_version   = ""
     boot_hooks           = []
     pre_start_hooks      = []
   }), "\r\n", "\n")
@@ -58,7 +59,7 @@ locals {
   # Names that belong to these templates. If one survives rendering, a variable was added to a
   # template but not to a renderer, and the shell would receive a literal dollar-brace string
   # where a device name belongs.
-  placeholder_names = ["model_family", "volume_device", "volume_id", "data_volume_device", "boot_hooks", "pre_start_hooks", "verify_weights"]
+  placeholder_names = ["model_family", "volume_device", "volume_id", "data_volume_device", "boot_hooks", "pre_start_hooks", "min_driver_version", "verify_weights"]
 }
 
 resource "terraform_data" "disk_identification" {
@@ -264,6 +265,38 @@ resource "terraform_data" "splice_order" {
     precondition {
       condition     = !can(regex("strata-instance-store", local.script))
       error_message = "With no hooks rendered the boot script must not contain hook text; the module under test was spliced into the base script."
+    }
+  }
+}
+
+resource "terraform_data" "driver_gate" {
+  input = length(local.lines)
+
+  lifecycle {
+    # An engine built against a newer CUDA than the AMI's driver does not fail at plan time:
+    # the container starts, the engine reports an insufficient driver, and the instance bills.
+    # The boot has to name the driver it found before it gets that far.
+    precondition {
+      condition = (
+        length([for i, l in local.lines : i if can(regex("NVIDIA driver", l))]) > 0 &&
+        length([for i, l in local.lines : i if can(regex("docker run -d", l))]) > 0 &&
+        [for i, l in local.lines : i if can(regex("NVIDIA driver", l))][0] < [for i, l in local.lines : i if can(regex("docker run -d", l))][0]
+      )
+      error_message = "The boot script must report the NVIDIA driver before it starts the container, so an insufficient driver is visible in the log rather than inferred from a dead engine."
+    }
+
+    # Dotted versions compare wrongly as strings: "9.1" sorts above "10.2".
+    precondition {
+      condition     = can(regex("sort -V", local.script))
+      error_message = "The driver floor must be compared with sort -V, not string comparison."
+    }
+
+    # The floor is opt-in. A default here would be a number this repository has not confirmed,
+    # and it would fail boots that work. Checked as "no digits in the rendered assignment"
+    # because that is the actual property, and it avoids escaping quotes inside a regex.
+    precondition {
+      condition     = can(regex("MIN_DRIVER=", local.script)) && !can(regex("MIN_DRIVER=[0-9]", local.script))
+      error_message = "min_driver_version must render empty by default: an unconfirmed floor would refuse working boots."
     }
   }
 }

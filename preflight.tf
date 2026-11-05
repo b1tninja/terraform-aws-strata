@@ -83,6 +83,19 @@ resource "terraform_data" "container_knobs" {
 }
 
 
+# Upstream publishes both moving tags (latest-cuda13) and pinned ones (0.2.9-cuda13, and per
+# backend: -cuda12, -rocm-gfx*, -sycl). A moving tag means two boots of this exact configuration
+# can run different engine builds. That matters more here than in a typical deployment: the
+# control-vector layer pins a commit and an explicit set of engine arguments precisely because
+# upstream's documentation and its shipped defaults have been observed to disagree, so the engine
+# underneath those pins should not be free to move between boots.
+check "image_tag_pinned" {
+  assert {
+    condition     = !startswith(var.strata_image_tag, "latest")
+    error_message = "strata_image_tag is \"${var.strata_image_tag}\", a moving tag: the next boot of this unchanged configuration can pull a different engine build. Pin one instead (ghcr.io/niko1221/strata publishes <version>-cuda12, -cuda13, -rocm-gfx*, -sycl). Note the images can lag the app release, so the newest tag is not always the newest engine."
+  }
+}
+
 # The verification mode is read by the boot script, so a typo would mean the check silently
 # does the wrong thing on every instance built from this configuration.
 resource "terraform_data" "verify_weights" {

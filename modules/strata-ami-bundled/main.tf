@@ -75,8 +75,9 @@ variable "model_family" {
 }
 
 variable "strata_image_tag" {
-  type    = string
-  default = "latest-cuda13"
+  description = "Image tag baked into the bundled AMI. Pinned by default; see the root module's variable of the same name for why moving tags are avoided."
+  type        = string
+  default     = "0.2.9-cuda13"
 }
 
 variable "enable_fsr" {

@@ -75,9 +75,26 @@ variable "ami_id" {
 }
 
 variable "strata_image_tag" {
-  description = "Strata Docker image tag to pull (e.g. 'latest-cuda13', '0.2.7-cuda13')"
+  description = <<-EOT
+    Strata Docker image tag to pull, pinned by default. Upstream publishes both moving tags
+    (latest-cuda13) and pinned ones per backend: <version>-cuda12, -cuda13, -rocm-gfx110x,
+    -rocm-gfx1151, -rocm-gfx120x, -sycl. List what exists with an anonymous token:
+      curl -s "https://ghcr.io/token?scope=repository:niko1221/strata:pull&service=ghcr.io"
+      curl -s -H "Authorization: Bearer <token>" https://ghcr.io/v2/niko1221/strata/tags/list
+
+    Pinned because a moving tag lets two boots of an unchanged configuration run different engine
+    builds, and the control-vector layer pins a commit and its engine arguments precisely because
+    upstream's docs and shipped defaults have disagreed before. Note the images can lag the app
+    release: Strata 0.2.10 was published as an app release before any 0.2.10 image tag appeared.
+    Setting a latest-* tag here is allowed and produces a plan-time warning, not an error.
+  EOT
   type        = string
-  default     = "latest-cuda13"
+  default     = "0.2.9-cuda13"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", var.strata_image_tag))
+    error_message = "strata_image_tag must be a single OCI tag with no slash or whitespace."
+  }
 }
 
 # ─── Model / Data ─────────────────────────────────────────────────────────────
@@ -258,6 +275,26 @@ variable "boot_hooks" {
   EOT
   type        = list(string)
   default     = []
+}
+
+variable "min_driver_version" {
+  description = <<-EOT
+    Fail the boot if the instance's NVIDIA driver is older than this, e.g. "570.00". Empty (the
+    default) means the boot logs the driver version it found and carries on.
+
+    Worth setting once measured, because a driver older than the image tag's CUDA build does not
+    fail at plan time: the container starts, the engine reports an insufficient driver version, and
+    the instance bills while it does. No default is imposed here - NVIDIA's CUDA-to-driver table
+    was not confirmable from the environment this module was written in, and a guessed floor would
+    fail deployments that work fine.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.min_driver_version == "" || can(regex("^[0-9]+(\\.[0-9]+){0,2}$", var.min_driver_version))
+    error_message = "min_driver_version must be empty or a dotted numeric version such as 570.124.04."
+  }
 }
 
 variable "pre_start_hooks" {

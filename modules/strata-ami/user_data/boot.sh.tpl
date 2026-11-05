@@ -204,6 +204,37 @@ else
   echo "  WARNING: nvidia-smi not available."
 fi
 
+# The GPU name is informational; the driver version decides whether the engine runs at all.
+# Strata publishes engine packages for CUDA 12 and CUDA 13 (ghcr tags such as 0.2.9-cuda12 and
+# 0.2.9-cuda13) and an engine built against a newer toolkit than the AMI's driver supports is not
+# a plan-time failure - the container starts, the engine reports an insufficient driver version,
+# and the instance bills while it does. The AMI is chosen by data source, so this is the first
+# point at which the real number can be seen, and it goes into the boot log on every instance.
+#
+# There is deliberately no default floor. NVIDIA's CUDA-to-driver table could not be confirmed
+# from the environment this was written in, and a guessed minimum would fail boots that work
+# fine. Set min_driver_version once you know what your image tag needs.
+DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1)
+if [ -z "$DRIVER_VER" ] && [ -r /proc/driver/nvidia/version ]; then
+  DRIVER_VER=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' /proc/driver/nvidia/version | head -n 1)
+fi
+
+if [ -z "$DRIVER_VER" ]; then
+  echo "  WARNING: no NVIDIA driver version reported; --gpus all will fail in the next step."
+else
+  echo "  NVIDIA driver $DRIVER_VER"
+  MIN_DRIVER="${min_driver_version}"
+  if [ -n "$MIN_DRIVER" ]; then
+    # sort -V rather than string comparison: "9.1" against "10.2" is decided wrongly by the latter.
+    lowest=$(printf '%s\n%s\n' "$MIN_DRIVER" "$DRIVER_VER" | sort -V | head -n 1)
+    if [ "$lowest" != "$MIN_DRIVER" ]; then
+      echo "ERROR: driver $DRIVER_VER is below min_driver_version $MIN_DRIVER for tag $STRATA_IMAGE_TAG."
+      echo "       Use an AMI with a newer driver, or the -cuda12 image for this tag if it exists."
+      exit 1
+    fi
+  fi
+fi
+
 # ─── Resolve the API key ───────────────────────────────────────────────────────
 if [ "$USE_SECRETS_MANAGER" = "true" ]; then
   echo "[3/6] Fetching API key from Secrets Manager..."
