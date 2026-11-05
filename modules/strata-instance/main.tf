@@ -162,6 +162,12 @@ variable "boot_hooks" {
   default     = []
 }
 
+variable "pre_start_hooks" {
+  description = "Shell fragments to splice into the boot script before the container starts; see the root module's variable of the same name for the narrower contract these hooks run under."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -195,6 +201,7 @@ locals {
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
     boot_hooks           = var.boot_hooks
+    pre_start_hooks      = var.pre_start_hooks
   }), "\r\n", "\n")
 
   common_tags = merge(var.tags, {

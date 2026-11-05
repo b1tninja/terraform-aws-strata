@@ -140,25 +140,34 @@ The production instance gets BOTH volumes from the AMI's BDM — no separate
 
 ## Boot Hooks
 
-The boot script has one extension point, so serving behaviour can grow without touching
-the core module or the shared script: `boot_hooks` is an ordered list of shell fragments
-that the script splices in **after** the model reports healthy.
+The boot script has two extension points, so behaviour can grow without touching the core
+module or the shared script. Both take an ordered list of opaque shell fragments and differ only
+in *when* they run - which is the entire reason there are two:
 
 ```
-[1/6] mount volume  [2/6] prerequisites  [3/6] API key  [4/6] pull image
-[5/6] start container  [6/6] wait for /health  ──►  boot hooks, in order
+[1/6] mount + verify  [2/6] prerequisites  [3/6] API key  [4/6] pull image
+        ──►  pre-start hooks  ──►  [5/6] start container  [6/6] wait for /health
+        ──►  boot hooks, in order
 ```
 
-The contract a hook may rely on, documented in the script itself: it runs as root with
-`$DATA_MOUNT`, `$DATA_DEVICE`, `$MODEL`, `$MODEL_FAMILY`, `$PORT`, `$REGION`,
-`$HEALTH_TIMEOUT` and `wait_loaded()` in scope, and with `set -euo pipefail` active, so a
-failing hook aborts the boot. Hooks must not redefine those names, and must not print step
-numbers of their own.
+A **pre-start hook** runs while the container does not exist yet, the last moment a layer can
+still change what `/data` points at. `wait_loaded()` is not in scope there because nothing is
+serving, and `set -euo pipefail` is active, so a failing hook aborts the boot. That is correct
+for a layer that is load-bearing and wrong for an optimisation, so an optimisation hook runs its
+body in a subshell that relaxes errexit and ends `true`: `modules/strata-instance-store` does
+exactly that, and `tests/instance_store` asserts it.
 
-A hook is opaque text, so Terraform cannot type-check it against the script. That gap is
-closed by `tests/boot_hooks`, which asserts the shipped hook keeps to the contract: it
-still verifies its pinned digest, still records `user_args`, still restarts the container
-once, does not redefine base names, and does not invent step labels.
+A **boot hook** runs after the model reports healthy, with `$DATA_MOUNT`, `$DATA_DEVICE`,
+`$MODEL`, `$MODEL_FAMILY`, `$PORT`, `$REGION`, `$HEALTH_TIMEOUT` and `wait_loaded()` in scope,
+and may restart the container and poll `/health`. Hooks in either phase must not redefine those
+names, and must not print step numbers of their own.
+
+A hook is opaque text, so Terraform cannot type-check it against the script. That gap is closed
+by tests: `tests/boot_disk` renders the script and asserts both splice points sit on the right
+side of `docker run` and of the `wait_loaded()` definition, and `tests/boot_hooks` asserts the
+shipped hook keeps to its contract - it still verifies its pinned digest, still records
+`user_args`, still restarts the container once, does not redefine base names, and does not
+invent step labels.
 
 The shipped hook is `modules/strata-control-vector`: it fetches a pinned control vector,
 verifies its SHA-256, records the engine arguments as `user_args` plus
@@ -166,6 +175,13 @@ verifies its SHA-256, records the engine arguments as `user_args` plus
 container once so the engine starts with the vector loaded. After that a caller chooses the
 behaviour per request, so one endpoint serves the model as published and the projected
 configuration. See [examples/nvfp4-uncensored](../examples/nvfp4-uncensored).
+
+The shipped pre-start layer is `modules/strata-instance-store`: it copies the pack onto the
+instance's local NVMe, verifies the copy against the weights manifest, and bind-mounts the
+result over `/data` with `install/`, `state/` and `.strata-manifest/` bound back from the EBS
+volume so the promotion step still sees tuning state. It is opt-in, it declines rather than
+failing a boot, and neither its copy time nor its mount propagation has been measured on real
+hardware yet.
 
 Why a hook re-applies on every boot rather than once: the container regenerates the run
 settings when the card assignment changes (`docker/entrypoint.sh:206-216`) and tuning

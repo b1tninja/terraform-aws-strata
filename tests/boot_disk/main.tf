@@ -31,6 +31,7 @@ locals {
     ttl_minutes          = 0
     region               = "us-east-1"
     boot_hooks           = []
+    pre_start_hooks      = []
   }), "\r\n", "\n")
 
   lines = split("\n", local.script)
@@ -57,7 +58,7 @@ locals {
   # Names that belong to these templates. If one survives rendering, a variable was added to a
   # template but not to a renderer, and the shell would receive a literal dollar-brace string
   # where a device name belongs.
-  placeholder_names = ["model_family", "volume_device", "volume_id", "data_volume_device", "boot_hooks", "verify_weights"]
+  placeholder_names = ["model_family", "volume_device", "volume_id", "data_volume_device", "boot_hooks", "pre_start_hooks", "verify_weights"]
 }
 
 resource "terraform_data" "disk_identification" {
@@ -218,6 +219,43 @@ resource "terraform_data" "rendering_integrity" {
         !can(regex("[$][{]" + name + "[}]", local.script)) && !can(regex("[$][{]" + name + "[}]", local.seed))
       ])
       error_message = "A template placeholder survived rendering; every renderer of boot.sh.tpl and download-weights.sh.tpl must supply every variable."
+    }
+  }
+}
+
+resource "terraform_data" "splice_order" {
+  input = length(local.lines)
+
+  lifecycle {
+    # Two splice points, and which one a fragment lands in is the whole contract of
+    # pre_start_hooks: before docker run a layer can still change what /data is, after it the
+    # model is already loaded and the only thing left to influence is serving behaviour.
+    precondition {
+      condition = (
+        length([for i, l in local.lines : i if can(regex("Pre-start hooks", l))]) > 0 &&
+        length([for i, l in local.lines : i if can(regex("docker run -d", l))]) > 0 &&
+        length([for i, l in local.lines : i if can(regex("Boot hooks", l))]) > 0 &&
+        [for i, l in local.lines : i if can(regex("Pre-start hooks", l))][0] < [for i, l in local.lines : i if can(regex("docker run -d", l))][0] &&
+        [for i, l in local.lines : i if can(regex("docker run -d", l))][0] < [for i, l in local.lines : i if can(regex("Boot hooks", l))][0]
+      )
+      error_message = "The pre-start splice must come before docker run and the post-ready hooks after it; the two contracts are different and the order is what makes them so."
+    }
+
+    # wait_loaded() is only defined after docker run, which is exactly why pre-start hooks may
+    # not call it. If that ever stops being true the contract comment is a lie.
+    precondition {
+      condition = (
+        length([for i, l in local.lines : i if can(regex("wait_loaded\\(\\) \\{", l))]) > 0 &&
+        [for i, l in local.lines : i if can(regex("wait_loaded\\(\\) \\{", l))][0] > [for i, l in local.lines : i if can(regex("docker run -d", l))][0]
+      )
+      error_message = "wait_loaded() must be defined after the container starts; pre_start_hooks documents that it does not exist at that point."
+    }
+
+    # A hook list that is empty must splice to nothing, not to an empty line that a later
+    # grep for "did any hook run" would read as yes.
+    precondition {
+      condition     = !can(regex("strata-instance-store", local.script))
+      error_message = "With no hooks rendered the boot script must not contain hook text; the module under test was spliced into the base script."
     }
   }
 }

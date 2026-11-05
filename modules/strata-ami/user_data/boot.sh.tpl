@@ -240,6 +240,23 @@ fi
 echo "[4/6] Pulling Strata image: ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG"
 docker pull "ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG" || true
 
+# ─── Pre-start hooks ───────────────────────────────────────────────────────────
+# A second, earlier splice point, because some layers are not about serving behaviour at
+# all: they change what /data points at, and that has to happen before the container exists.
+#
+# The contract is deliberately narrower than the one at the end of this script:
+#   - runs as root, after the data volume is mounted and verified, before docker run
+#   - $DATA_MOUNT, $DATA_DEVICE, $MODEL, $MODEL_FAMILY, $PORT, $REGION, $HEALTH_TIMEOUT and
+#     $VERIFY_WEIGHTS are in scope. wait_loaded() is NOT: nothing is serving yet, and a hook
+#     that polls a health endpoint here would hang until the boot times out.
+#   - set -euo pipefail is active, so a failing hook aborts the boot. Most pre-start layers
+#     are optimisations, and an optimisation that bricks a boot is worse than no
+#     optimisation, so a hook's body belongs in a subshell that relaxes errexit and ends true.
+#   - a hook may remount $DATA_MOUNT; whatever it leaves mounted is what the container sees.
+%{ for hook in pre_start_hooks ~}
+${hook}
+%{ endfor ~}
+
 # ─── Start container ───────────────────────────────────────────────────────────
 echo "[5/6] Starting Strata container..."
 

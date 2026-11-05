@@ -66,6 +66,12 @@ which this engine calls **experimental speed projection** (`cvec=0|1`); the fork
 publishes the vector and the Windows launcher call the result **uncensored**. It is not
 OrcaRouter-style *abliteration*, which edits the weights.
 
+`boot_hooks` is one of two splice points in the boot script. The other, `pre_start_hooks`, runs
+before the container exists - the last moment a layer can still change what `/data` points at -
+which is how `modules/strata-instance-store` serves the pack from the instance's local NVMe.
+Both are opaque text and the contracts differ, so `tests/boot_disk` asserts each splice lands on
+the right side of `docker run` and of the `wait_loaded()` definition.
+
 Two gates run at plan time. **Lineage:** the vector is one direction in
 Qwen3.8-Flash-Next's activation space, so it applies to packs derived from those weights -
 upstream measured it on `qwen-nvfp4-gptq`, ISTA's Q2_0 and IQ2_XS, and Unsloth's
@@ -142,13 +148,21 @@ terraform-aws-strata/
 ├── outputs.tf               # Endpoint, IPs, IDs
 ├── versions.tf              # Provider constraints
 ├── modules/
-│   ├── strata-ami/          # EC2 Image Builder pipeline
-│   ├── strata-data-snapshot/ # Weights volume → snapshot → FSR
-│   └── strata-instance/     # Standalone instance module
+│   ├── strata-ami/             # EC2 Image Builder pipeline
+│   ├── strata-ami-bundled/     # AMI with the weights volume baked in
+│   ├── strata-catalog/         # Model/instance facts checked at plan time
+│   ├── strata-control-vector/  # Boot hook: refusal-direction projection
+│   ├── strata-data-snapshot/   # Weights volume → snapshot → FSR
+│   ├── strata-instance/        # Standalone instance module
+│   ├── strata-instance-store/  # Pre-start hook: serve from local NVMe
+│   └── strata-volume-snapshot/ # Promote tuned state into the golden snapshot
 ├── examples/
-│   ├── ephemeral-on-demand/ # Simplest: deploy + destroy
-│   ├── spot-fleet/          # Cost-optimized with spot
-│   └── full-pipeline/       # Build everything from scratch
+│   ├── ephemeral-on-demand/    # Simplest: deploy + destroy
+│   ├── spot-fleet/             # Cost-optimized with spot
+│   ├── full-pipeline/          # Build everything from scratch
+│   ├── nvfp4-uncensored/       # One model, two behaviours, per request
+│   ├── one-snapshot-two-configs/ # Same volume, different serving settings
+│   └── layered-stacks/         # base + uncensored as separate states
 ├── .github/workflows/
 │   ├── build-ami.yml        # Rebuild AMI (weekly/manual)
 │   ├── refresh-weights.yml  # Download model → snapshot → FSR

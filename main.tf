@@ -199,6 +199,7 @@ locals {
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region
     boot_hooks           = var.boot_hooks
+    pre_start_hooks      = var.pre_start_hooks
   }), "\r\n", "\n")
 }
 

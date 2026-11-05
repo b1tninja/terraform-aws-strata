@@ -26,6 +26,7 @@ init: ## terraform init (all modules + examples)
 	$(TF) -chdir=tests/catalog init -backend=false
 	$(TF) -chdir=tests/boot_hooks init -backend=false
 	$(TF) -chdir=tests/boot_disk init -backend=false
+	$(TF) -chdir=tests/instance_store init -backend=false
 
 fmt: ## Format all Terraform files
 	$(TF) fmt -recursive
@@ -41,6 +42,7 @@ validate: ## Validate all modules and examples
 	cd modules/strata-data-snapshot && $(TF) validate
 	cd modules/strata-volume-snapshot && $(TF) validate
 	cd modules/strata-instance && $(TF) validate
+	cd modules/strata-instance-store && $(TF) validate
 	cd examples/ephemeral-on-demand && $(TF) validate
 	cd examples/spot-fleet && $(TF) validate
 	cd examples/full-pipeline && $(TF) validate
@@ -49,10 +51,11 @@ validate: ## Validate all modules and examples
 	cd examples/layered-stacks/base && $(TF) validate
 	cd examples/layered-stacks/uncensored && $(TF) validate
 
-catalog-test: ## Plan-time assertions: catalog, boot hooks, boot disk identification (no AWS creds)
+catalog-test: ## Plan-time assertions: catalog, boot hooks, boot disk, instance store (no AWS creds)
 	$(TF) -chdir=tests/catalog plan -no-color
 	$(TF) -chdir=tests/boot_hooks plan -no-color
 	$(TF) -chdir=tests/boot_disk plan -no-color
+	$(TF) -chdir=tests/instance_store plan -no-color
 
 lint: ## Run tflint on all modules
 	$(TFLINT) --init

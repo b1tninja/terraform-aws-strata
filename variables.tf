@@ -260,6 +260,21 @@ variable "boot_hooks" {
   default     = []
 }
 
+variable "pre_start_hooks" {
+  description = <<-EOT
+    Shell fragments spliced into the boot script before the container starts, for layers that
+    change what /data points at rather than how the model serves - a weights copy on local
+    NVMe, say. The contract is narrower than boot_hooks: wait_loaded() does not exist yet
+    because nothing is serving, and set -euo pipefail is active, so a hook that fails aborts
+    the boot. An optimisation hook should therefore run its body in a subshell that relaxes
+    errexit and ends true; modules/strata-instance-store does exactly that.
+
+      pre_start_hooks = [module.scratch.pre_start_hook]   # see modules/strata-instance-store
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 # ─── Lifecycle ────────────────────────────────────────────────────────────────
 variable "ttl_minutes" {
   description = "Auto-terminate the instance after this many minutes (0 = no auto-terminate)"
