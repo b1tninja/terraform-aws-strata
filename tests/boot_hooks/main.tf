@@ -41,6 +41,15 @@ resource "terraform_data" "contract" {
       error_message = "The control-vector hook rendered empty or trivial text, so the template or its inputs are broken."
     }
 
+    # The hook is spliced into a boot script that the caller renders with CRLF stripped, so a
+    # CR surviving here lands in user_data as "command\r". On a Windows working tree (core.
+    # autocrlf=true gives i/lf w/crlf checkouts) that aborts the boot under set -e, after the
+    # model is already healthy. trimspace() does not help: it only touches the ends.
+    precondition {
+      condition     = !can(regex("\r", local.hook))
+      error_message = "The rendered hook contains carriage returns; spliced into the boot script it would fail on every line."
+    }
+
     # The base boot script owns these names; a hook that redefines them corrupts every
     # hook after it, which is the failure mode a contract most needs to prevent.
     precondition {

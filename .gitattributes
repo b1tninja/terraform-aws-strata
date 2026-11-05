@@ -1,0 +1,32 @@
+# Line endings decided by what a file IS, not by each contributor's git config.
+#
+# git ls-files --eol in this repository reports i/lf w/crlf for every template: the index holds
+# LF, and a working tree cloned with core.autocrlf=true (the Windows default) gets CRLF. Most of
+# the time that is cosmetic. Here it is not: these templates are rendered into things a Linux
+# machine executes. The boot script and the hook fragments become user_data, and the seeding
+# script becomes a staging instance's user_data. A renderer that forgets to strip the CR ships
+# "#!/bin/bash\r" or "command\r" to an instance that is already rented.
+#
+# Pinning eol=lf makes the worktree match the index for the files where byte-exactness matters.
+# The renderers still call replace("\r\n", "\n") as well, on purpose: a file added before this
+# existed, or written by a tool that emits CRLF, should not have to depend on git's configuration
+# to produce a bootable script.
+* text=auto
+
+*.tf        text eol=lf
+*.tfvars    text eol=lf
+*.tfvars.json text eol=lf
+*.tpl       text eol=lf
+*.tftpl     text eol=lf
+*.sh        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.hcl       text eol=lf
+*.json      text eol=lf
+*.lock.hcl  text eol=lf
+*.md        text eol=lf
+
+# Checked out byte-for-byte.
+*.png  binary
+*.gz   binary
+*.zip  binary

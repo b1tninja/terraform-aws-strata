@@ -149,6 +149,14 @@ resource "terraform_data" "script_hygiene" {
       condition     = can(regex("set -euo pipefail", local.script))
       error_message = "The hook contract documents set -euo pipefail as active; removing it silently changes what a hook may assume."
     }
+
+    # The seeding script is passed to cloud-init as user_data unmodified by the boot script's
+    # own CRLF handling, so a CR here means "#!/bin/bash\r" and a staging instance that never
+    # runs the download - then snapshots an empty volume as the golden reference.
+    precondition {
+      condition     = !can(regex("\r", local.seed))
+      error_message = "The rendered seeding script contains carriage returns; its shebang would not execute."
+    }
   }
 }
 

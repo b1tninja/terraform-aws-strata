@@ -162,14 +162,18 @@ resource "aws_instance" "staging" {
     }
   }
 
-  user_data = templatefile("${path.module}/download-weights.sh.tpl", {
+  # CRLF-stripped: this becomes a staging instance's user_data verbatim, and "#!/bin/bash\r" is
+  # a shebang cloud-init will not execute. The failure is quiet and expensive - the instance
+  # never downloads, the volume is snapshotted empty, and that snapshot becomes the golden
+  # reference every later instance restores from.
+  user_data = replace(templatefile("${path.module}/download-weights.sh.tpl", {
     model         = var.model
     model_family  = var.model_family
     volume_device = "/dev/sdf"
     # The id, not the API device name, is what the script resolves the disk with: /dev/sdf is
     # what the attachment is told to use, which Nitro does not reproduce inside the instance.
     volume_id = aws_ebs_volume.staging.id
-  })
+  }), "\r\n", "\n")
 
   tags = merge(local.common_tags, { Name = "${var.name_prefix}-staging" })
 

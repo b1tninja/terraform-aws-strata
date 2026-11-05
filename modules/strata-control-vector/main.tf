@@ -118,7 +118,12 @@ resource "terraform_data" "gate" {
 }
 
 locals {
-  fragment = trimspace(templatefile("${path.module}/templates/apply-vector.sh.tpl", {
+  # CRLF-stripped for the same reason the boot script is. A Windows working tree checks
+  # templates out with CR+LF when core.autocrlf is true (git ls-files --eol reports i/lf
+  # w/crlf here), and this text is spliced verbatim into user_data, where bash reads
+  # "command\r" as a command named "command\r". trimspace() does not help: it only reaches the
+  # ends of the fragment, not the interior line endings.
+  fragment = trimspace(replace(templatefile("${path.module}/templates/apply-vector.sh.tpl", {
     base              = local.base
     files             = local.files
     args_json         = jsonencode(local.recipe)
@@ -126,6 +131,6 @@ locals {
     separate_endpoint = var.separate_endpoint
     suffix            = "-uncensored"
     commit_ref        = local.ref
-  }))
+  }), "\r\n", "\n"))
 }
 
