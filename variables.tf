@@ -161,6 +161,59 @@ variable "extra_env" {
   default     = {}
 }
 
+variable "tune_mode" {
+  description = <<-EOT
+    How the container tunes the run settings: "quick", "thorough" or "skip". Tuning
+    happens once and is kept in the preset, so a restart does not tune again; set this to
+    "skip" to leave whatever tuning the volume already has alone, or pass RETUNE=1 through
+    extra_env to force a fresh pass.
+
+    The container's own default is "skip"; this module asks for a quick pass on first boot
+    because an untuned preset is measurably slower and there is nobody at the keyboard.
+  EOT
+  type        = string
+  default     = "quick"
+}
+
+variable "parallel" {
+  description = <<-EOT
+    Requests answered at the same time, 1 to 8. Leave unset and the container fits it to
+    the card, which is the right answer almost always: this is a routed model whose decode
+    is bound by card bandwidth, so more concurrency mostly costs memory.
+  EOT
+  type        = number
+  default     = null
+}
+
+variable "gpus" {
+  description = <<-EOT
+    Which cards the engine may use, as the monitor numbers them: "0" or "0,1". Empty means
+    the engine's choice.
+
+    Two things follow from setting it. On a volume whose model is already set up, the
+    container deletes the saved run settings when they name a different card and lets setup
+    write them again from the files present (docker/entrypoint.sh:206-216; the weights are
+    kept). That also drops anything a boot hook recorded in the run config, which is why
+    hooks re-apply on every boot rather than once. And it cannot be combined with
+    gpu_roles, which the container treats as a hard error (:222).
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "gpu_roles" {
+  description = <<-EOT
+    A role per card instead of a card list: "1=main,0=helper", roles being main, helper
+    or off, and unnamed cards off. Mutually exclusive with gpus.
+
+    Prefer this on multi-card instances: the roles are written into the run settings at
+    every start, so nothing saved has to be dropped the way gpus does (docs/DOCKER.md:124,
+    docker/entrypoint.sh:218-224).
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "boot_hooks" {
   description = <<-EOT
     Shell fragments to splice into the boot script, in order, after the model reports

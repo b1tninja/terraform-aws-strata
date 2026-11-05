@@ -10,7 +10,7 @@ output "boot_hook" {
     engine starts with the vector loaded, and waits for health again. Any failure aborts
     the boot rather than serving something unverified.
   EOT
-  value = local.fragment
+  value       = local.fragment
 }
 
 output "request_switch" {

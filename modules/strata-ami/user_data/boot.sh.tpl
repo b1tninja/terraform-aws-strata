@@ -133,8 +133,20 @@ echo "API_KEY=$API_KEY" >> "$ENV_FILE"
 echo "CONTEXT=$CONTEXT" >> "$ENV_FILE"
 echo "KV=$KV" >> "$ENV_FILE"
 echo "VISION=$VISION" >> "$ENV_FILE"
-echo "TUNE=quick" >> "$ENV_FILE"
-echo "PORT=8080" >> "$ENV_FILE"
+echo "TUNE=${tune_mode}" >> "$ENV_FILE"
+echo "PORT=$PORT" >> "$ENV_FILE"
+%{ if parallel != null ~}
+echo "PARALLEL=${parallel}" >> "$ENV_FILE"
+%{ endif ~}
+%{ if gpus != "" ~}
+echo "GPUS=${gpus}" >> "$ENV_FILE"
+%{ endif ~}
+%{ if gpu_roles != "" ~}
+echo "GPU_ROLES=${gpu_roles}" >> "$ENV_FILE"
+%{ endif ~}
+# Engine-level switches (STRATA_*, see docs/NVFP4.md) are not entrypoint settings, so they
+# are not modelled here: pass them through extra_env and they reach the engine's own
+# environment.
 %{ for key, value in extra_env ~}
 echo "${key}=${value}" >> "$ENV_FILE"
 %{ endfor ~}
@@ -146,7 +158,7 @@ docker run -d --rm \
   --ulimit memlock=-1 \
   --shm-size 4g \
   --stop-timeout 120 \
-  -p "0.0.0.0:$PORT:8080" \
+  -p "0.0.0.0:$PORT:$PORT" \
   -v "$DATA_MOUNT:/data" \
   --env-file "$ENV_FILE" \
   "ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG"
@@ -165,7 +177,10 @@ wait_loaded() {
       return 1
     fi
     health=$(curl -sf "http://localhost:$PORT/health" 2>/dev/null || echo "{}")
-    if echo "$health" | grep -q '"loaded":true'; then
+    # Tolerant on purpose: the server serialises with json.dumps default separators, so
+    # the wire form is "loaded": true with a space. A no-space grep would never match
+    # and every boot would sit until health_check_timeout and fail.
+    if echo "$health" | grep -qE '"loaded"[[:space:]]*:[[:space:]]*true'; then
       echo "  Model ready after $elapsed s"
       return 0
     fi

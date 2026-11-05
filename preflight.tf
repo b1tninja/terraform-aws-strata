@@ -43,3 +43,42 @@ resource "terraform_data" "preflight" {
     }
   }
 }
+
+# The container knobs are passed straight through to the image, so without these the
+# first feedback would be a boot failure on a rented GPU after 128 GB has been restored.
+resource "terraform_data" "container_knobs" {
+  input = {
+    tune_mode = var.tune_mode
+    parallel  = var.parallel
+    gpus      = var.gpus
+    gpu_roles = var.gpu_roles
+  }
+
+  lifecycle {
+    precondition {
+      condition     = contains(["quick", "thorough", "skip"], var.tune_mode)
+      error_message = "tune_mode must be quick, thorough or skip. The entrypoint lower-cases it and ignores anything else (docker/entrypoint.sh:229-230), so a typo silently means no tuning."
+    }
+
+    precondition {
+      condition     = var.parallel == null || (var.parallel >= 1 && var.parallel <= 8)
+      error_message = "parallel is 1 to 8 requests answered at the same time, or unset to let the container fit it to the card."
+    }
+
+    precondition {
+      condition     = var.gpus == "" || var.gpu_roles == ""
+      error_message = "gpus and gpu_roles are mutually exclusive: the container dies with \"Set GPU_ROLES or GPU / GPUS, not both\" (docker/entrypoint.sh:222)."
+    }
+
+    precondition {
+      condition     = var.gpus == "" || can(regex("^[0-9]+(,[0-9]+)*$", var.gpus))
+      error_message = "gpus must be comma-separated card numbers as the monitor lists them, e.g. \"0\" or \"0,1\"."
+    }
+
+    precondition {
+      condition     = var.gpu_roles == "" || can(regex("^[0-9]+=(main|helper|off)(,[0-9]+=(main|helper|off))*$", var.gpu_roles))
+      error_message = "gpu_roles must be comma-separated card=role pairs with the role one of main, helper or off, e.g. \"1=main,0=helper\"."
+    }
+  }
+}
+

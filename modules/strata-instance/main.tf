@@ -126,6 +126,30 @@ variable "extra_env" {
   default = {}
 }
 
+variable "tune_mode" {
+  description = "How the container tunes the run settings: quick, thorough or skip. The module asks for quick on first boot; the container's own default is skip."
+  type        = string
+  default     = "quick"
+}
+
+variable "parallel" {
+  description = "Requests answered at the same time, 1 to 8; null lets the container fit it to the card."
+  type        = number
+  default     = null
+}
+
+variable "gpus" {
+  description = "Cards the engine may use, e.g. \"0,1\"; empty means the engine's choice. Setting it can make the container regenerate the saved run settings, and it is mutually exclusive with gpu_roles."
+  type        = string
+  default     = ""
+}
+
+variable "gpu_roles" {
+  description = "A role per card, e.g. \"1=main,0=helper\"; preferred over gpus on multi-card instances because it does not force the run settings to be rewritten. Mutually exclusive with gpus."
+  type        = string
+  default     = ""
+}
+
 variable "boot_hooks" {
   description = "Shell fragments to splice into the boot script after the model is healthy; see the root module's variable of the same name for the contract hooks rely on."
   type        = list(string)
@@ -156,10 +180,14 @@ locals {
     data_volume_mount    = "/data"
     port                 = 8080
     extra_env            = var.extra_env
+    tune_mode            = var.tune_mode
+    parallel             = var.parallel
+    gpus                 = var.gpus
+    gpu_roles            = var.gpu_roles
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
-    boot_hooks             = var.boot_hooks
+    boot_hooks           = var.boot_hooks
   }), "\r\n", "\n")
 
   common_tags = merge(var.tags, {

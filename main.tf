@@ -190,10 +190,14 @@ locals {
     data_volume_mount    = "/data"
     port                 = 8080
     extra_env            = var.extra_env
+    tune_mode            = var.tune_mode
+    parallel             = var.parallel
+    gpus                 = var.gpus
+    gpu_roles            = var.gpu_roles
     health_check_timeout = var.health_check_timeout_seconds
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region
-    boot_hooks             = var.boot_hooks
+    boot_hooks           = var.boot_hooks
   }), "\r\n", "\n")
 }
 

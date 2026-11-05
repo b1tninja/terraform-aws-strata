@@ -104,8 +104,8 @@ module "strata" {
   ttl_minutes = var.ttl_minutes
 
   tags = {
-    Stack       = "uncensored"
-    BaseStack   = data.terraform_remote_state.base.outputs.weights_snapshot_id
+    Stack         = "uncensored"
+    BaseStack     = data.terraform_remote_state.base.outputs.weights_snapshot_id
     Configuration = "refusal-direction projection, on by default"
   }
 }

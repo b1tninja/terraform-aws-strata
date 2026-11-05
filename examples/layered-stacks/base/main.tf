@@ -93,10 +93,10 @@ output "model" {
 
 output "model_family" {
   description = "Recorded so a serving stack can assert the licence and lineage gates against what actually boots"
-  value = var.model_family
+  value       = var.model_family
 }
 
 output "volume_size" {
   description = "The snapshot's volume size, so a serving stack does not have to guess how big to make its volume"
-  value = var.volume_size
+  value       = var.volume_size
 }
