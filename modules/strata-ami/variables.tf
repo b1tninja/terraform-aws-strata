@@ -23,9 +23,25 @@ variable "base_ami_name_pattern" {
 }
 
 variable "build_instance_type" {
-  description = "Instance type used for the Image Builder build phase"
+  description = <<-EOT
+    Instance type used for the Image Builder build phase.
+
+    This does not need a GPU. Both build components are CPU and network work:
+    components/install-docker.yaml installs Docker and configures nvidia-container-toolkit
+    (nvidia-ctk runtime configure writes a daemon config; it does not touch a card), and
+    components/pull-strata-image.yaml.tpl runs docker pull and docker image inspect. The
+    CUDA drivers and toolkit land in the image from the Deep Learning base AMI, which is
+    selected by data source, not built here, so nothing about the artefact depends on the
+    build instance having a GPU.
+
+    An AMI is architecture-dependent, not instance-family dependent: build on x86_64 here
+    and boot it on g7e later. Keep the architecture matched, and keep the root volume big
+    enough for the pulled image.
+
+    Set this back to a GPU type only if you add a build step that genuinely probes a card.
+  EOT
   type        = string
-  default     = "g6e.xlarge"
+  default     = "c6i.2xlarge"
 }
 
 variable "subnet_id" {

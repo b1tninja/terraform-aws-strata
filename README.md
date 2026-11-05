@@ -169,6 +169,33 @@ All workflows use OIDC (no stored AWS keys). Configure:
 - `secrets.AWS_ROLE_ARN` — IAM role with EC2/EBS/Image Builder permissions
 - `vars.BUILD_SUBNET_ID` / `vars.STAGING_SUBNET_ID` — subnet for build instances
 
+## Where the money goes
+
+Only one stage of this pipeline needs a GPU, so only that stage should be paying GPU rates.
+Prices are spot/on-demand hourly for Linux, read from the catalogue on 2026-11-04 for
+us-east-1; instance prices you do not see here were not verified and should be checked in
+your account.
+
+| Stage | Needs a card? | Runs on | Note |
+|---|---|---|---|
+| Build the AMI (Docker + `docker pull`) | **No** | `c6i.2xlarge` | the CUDA stack comes from the Deep Learning base AMI, selected by data source; the build steps only install and pull |
+| Download and convert weights, write the manifest | **No** | `c6i.xlarge`, `use_spot` optional | long and network-bound; spot is cheaper but a reclamation restarts the download, so leave it off for the one run that must finish |
+| First boot: load, tune, validate a hook | **Yes** | `g7.8xlarge` spot **$0.768/hr** | same sm_120 engine path as `g7e`, experts just spill to RAM; plumbing is what you are proving here, not throughput |
+| Promote that volume to a snapshot | No | no instance at all | `modules/strata-volume-snapshot`; tuning lives on the volume (`/data/state`), so this is what stops every later instance re-tuning |
+| Serve | **Yes** | `g7e.8xlarge` spot **$3.190/hr**, on-demand $5.268 | NVFP4 on 96 GiB of VRAM; `g7.8xlarge` (32 GiB) is the cheap way to get an FP4-capable box |
+
+Three levers beyond instance choice:
+
+- **Idle cost dominates.** `ttl_minutes` plus the EventBridge scheduler terminate the
+  instance at TTL expiry; a forgotten `g7e` costs more in a day than the whole pipeline.
+- **Fast Snapshot Restore is a standing charge** per enabled availability zone while it is
+  on, not per use. `enable_fsr` exists on both snapshot paths; turn it on to launch and off
+  when you stop. Provisioned rate for volume initialization is the pay-per-create
+  alternative (AWS illustrates it at roughly $0.0036 per GB of snapshot at 300 MB/s,
+  region-dependent) if you only restore occasionally.
+- **Volumes are cheap, hours are not.** gp3 is $0.08 per GB-month with 3,000 IOPS included,
+  so keeping several model snapshots is a rounding error next to one wasted GPU hour.
+
 ## Security & Lifecycle
 
 | Flag | Effect |

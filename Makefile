@@ -37,6 +37,7 @@ validate: ## Validate all modules and examples
 	cd modules/strata-ami-bundled && $(TF) validate
 	cd modules/strata-catalog && $(TF) validate
 	cd modules/strata-data-snapshot && $(TF) validate
+	cd modules/strata-volume-snapshot && $(TF) validate
 	cd modules/strata-instance && $(TF) validate
 	cd examples/ephemeral-on-demand && $(TF) validate
 	cd examples/spot-fleet && $(TF) validate

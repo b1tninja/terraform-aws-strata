@@ -61,6 +61,23 @@ variable "key_pair_name" {
   default     = ""
 }
 
+variable "use_spot" {
+  description = <<-EOT
+    Run the staging download on spot capacity. It is CPU and network work, so it discounts
+    well - but a reclamation mid-download means the download runs again from the start,
+    which costs hours rather than money. Worth it for a small pack or a patient iteration;
+    leave it off for the one 128 GB run you actually need to finish.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "spot_max_price" {
+  description = "Optional hourly price cap for the spot staging instance, as a string. Empty means no cap, which still gets interrupted when capacity runs out."
+  type        = string
+  default     = ""
+}
+
 variable "enable_fsr" {
   description = "Enable Fast Snapshot Restore on the resulting snapshot"
   type        = bool
@@ -128,6 +145,22 @@ resource "aws_instance" "staging" {
   subnet_id              = var.staging_subnet_id
   key_name               = var.key_pair_name != "" ? var.key_pair_name : null
   vpc_security_group_ids = [aws_security_group.staging.id]
+
+  # Spot is a real discount on a run that is mostly waiting on the network, with a catch
+  # worth stating: the download is long, and a reclamation mid-way means starting it over,
+  # because nothing resumes it. The data volume is a separate resource and survives, so the
+  # re-run re-downloads into the same volume rather than losing storage.
+  dynamic "instance_market_options" {
+    for_each = var.use_spot ? [1] : []
+    content {
+      market_type = "spot"
+
+      spot_options {
+        spot_instance_type = "one-time"
+        max_price          = var.spot_max_price != "" ? var.spot_max_price : null
+      }
+    }
+  }
 
   user_data = templatefile("${path.module}/download-weights.sh.tpl", {
     model         = var.model
