@@ -10,6 +10,10 @@ name: Quality
 # the working tree now, the same reason the Makefile is.
 
 on:
+  # Manual because the first push to a brand-new repository is not guaranteed to trigger anything,
+  # and because after touching anything in Settings → Actions you want a way to prove the pipeline
+  # is live without inventing a throwaway commit.
+  workflow_dispatch:
   pull_request:
     paths:
       - "**/*.tf"
@@ -18,6 +22,13 @@ on:
       - "**/*.hcl"
       - "**/*.tfvars"
       - ".github/workflows/quality.yml"
+      # The docs job regenerates README.md from the module using .terraform-docs.yml and the
+      # terraform-docs version the devcontainer pins, so all three have to be able to start it.
+      # They were not listed, which meant the check that exists to catch a stale generated section
+      # could never run on a change to the files that make it stale.
+      - ".terraform-docs.yml"
+      - ".devcontainer/devcontainer.json"
+      - "**/*.md"
       - "Makefile"
   push:
     # Both spellings on purpose: this repository's history is on master, while GitHub creates
@@ -29,6 +40,9 @@ on:
       - "**/*.tpl"
       - "**/*.tftpl"
       - "**/*.hcl"
+      - ".terraform-docs.yml"
+      - ".devcontainer/devcontainer.json"
+      - "**/*.md"
 
 permissions:
   contents: read
