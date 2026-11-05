@@ -1,0 +1,25 @@
+# Suppressions for `trivy config`, referenced by trivy.yaml (report.ignorefile). Every entry needs
+# a statement: an ID with no reason attached is how a security gate quietly stops meaning anything.
+
+misconfigurations:
+  # AVD-AWS-0104 (CRITICAL): "A security group rule should not allow unrestricted egress to any
+  # IP address." This is accepted deliberately, and it is accepted for the whole repository rather
+  # than file by file because it is a property of the design, not of one security group.
+  #
+  # These instances have to reach ghcr.io for the engine image and whatever CDN a model download
+  # resolves to - HuggingFace redirects to rotating object-storage addresses that cannot be
+  # expressed as a stable CIDR, and a prefix list covers AWS services only. Narrowing egress here
+  # means a boot that fails partway through a multi-hundred-gigabyte download, on an instance that
+  # is billing while it retries.
+  #
+  # What limits the blast radius instead: the instances are ephemeral and rebuilt rather than
+  # patched; ingress is one API port governed by var.allowed_cidr_blocks; the API key is not baked
+  # into user_data but fetched from Secrets Manager over an IMDSv2-required instance
+  # (metadata_options.http_tokens = "required"), which is the path an egress-restricted box would
+  # still have to open.
+  - id: AVD-AWS-0104
+    statement: >-
+      Egress is intentionally unrestricted: the engine image comes from ghcr.io and model weights
+      from rotating CDN addresses that cannot be pinned to a CIDR. Compensating controls:
+      ephemeral instances, one ingress port gated by allowed_cidr_blocks, API key fetched from
+      Secrets Manager over IMDSv2 rather than baked into user_data.

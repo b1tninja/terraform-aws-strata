@@ -1,0 +1,25 @@
+# Trivy reads this file from the repository root automatically. Both keys are the config-file
+# equivalents of CLI flags (`--ignorefile`, `--tf-vars`), which means the CI job needs no extra
+# input and a local `trivy config .` behaves the same way as the pipeline.
+#
+# terraform.vars exists because Trivy's parser does NOT read `default = ...` from variable
+# declarations. Its log said so while it scanned this repository:
+#   WARN [terraform parser] Variable values were not found in the environment or variable files.
+#          Evaluating may not work correctly.
+# Every data-volume block_device_mapping here lives in a `dynamic` block gated on a variable, so
+# with no values the parser could not see the mapping at all - and then reported aws-0131
+# ("Instance with unencrypted block device") and aws-0028 ("enforce IMDSv2") against instances
+# whose metadata_options says http_tokens = "required" and whose ebs blocks say encrypted = true
+# as literals, in all three places. Those findings were artifacts of not evaluating, not gaps.
+# Giving the parser the module's own defaults is the fix; suppressing them would have hidden the
+# real signal along with the noise.
+misconfiguration:
+  terraform:
+    vars:
+      - "ci/trivy.tfvars"
+
+report:
+  # .trivyignore.yaml rather than .trivyignore, because the YAML form carries `statement`, and an
+  # ignore without a written reason is indistinguishable from someone silencing a finding to get
+  # a green check.
+  ignorefile: ".trivyignore.yaml"

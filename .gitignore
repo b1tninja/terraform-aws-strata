@@ -15,6 +15,10 @@ override.tf.json
 .terraformmodules.json
 *.tfvars
 *.tfvars.json
+# ...except this one, which is not a deployment input. ci/trivy.tfvars holds values for Trivy's
+# Terraform parser (see trivy.yaml); it is read by the scanner in CI, and an ignored file there
+# means the parser falls back to guessing and reports the encryption/IMDS findings all over again.
+!ci/trivy.tfvars
 
 # Lock files, split by what the directory IS:
 #   examples/ and tests/ are root modules - you run terraform init inside them - so their
