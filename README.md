@@ -10,6 +10,13 @@ Strata runs massive MoE models (Qwen3.8-Flash-Next, DeepSeek V4.1) by distributi
 2. **Enables EBS Fast Snapshot Restore** so volumes are fully initialized at creation (no lazy loading)
 3. **Bakes the Strata Docker image** into a custom AMI (no pull at boot)
 4. **Launches ephemeral GPU instances** that are serving within ~90 seconds
+5. **Validates your choice against the model and instance catalogue** at plan time, so an
+   instance the engine has no build for, or a volume too small for the pack, fails before
+   anything is rented
+6. **Composes serving behaviour through boot hooks**: the shipped `strata-control-vector`
+   module loads a refusal-direction projection so one endpoint serves the model as
+   published *and* steered, chosen per request, for 267,552 bytes rather than a second
+   128 GB download
 
 ```
 terraform apply → wait 90s → POST /v1/chat/completions → terraform destroy

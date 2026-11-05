@@ -132,9 +132,45 @@ The production instance gets BOTH volumes from the AMI's BDM — no separate
 |---------|------|
 | **EC2 Image Builder** | Build AMI with drivers + Docker + pre-pulled Strata image |
 | **EBS Fast Snapshot Restore** | Volume fully initialized at creation — zero I/O latency penalty |
-| **EC2 G6e / G5** | GPU instances, compute capability 8.6/8.9 (Strata CUDA compatible) |
+| **EC2 g5 / g6e** | Ampere and Ada: compute capability 8.6 / 8.9. Runs the engine fine, but NVFP4 packs execute on the 8-bit path - the FP4 MMA unit exists only on sm_120 |
+| **EC2 g7 / g7e** | Blackwell RTX (sm_120), the cards NVFP4 was written for. `g7e.8xlarge` pairs 96 GiB of VRAM with 1900 GiB of local NVMe; `g7.8xlarge` is the cheapest way to get an FP4-capable box |
+| **EC2 p5 / p6** (Hopper, datacenter Blackwell) | The engine ships packages for sm_75/80/86/89/120 only, so sm_90 and sm_100 exit before loading anything. The catalogue rejects these at plan time rather than after an expensive restore |
 | **SSM Parameter Store** | Store latest AMI ID + per-model snapshot IDs for CI/CD lookup |
 | **OIDC + IAM Roles** | GitHub Actions → AWS auth without long-lived secrets |
+
+## Boot Hooks
+
+The boot script has one extension point, so serving behaviour can grow without touching
+the core module or the shared script: `boot_hooks` is an ordered list of shell fragments
+that the script splices in **after** the model reports healthy.
+
+```
+[1/6] mount volume  [2/6] prerequisites  [3/6] API key  [4/6] pull image
+[5/6] start container  [6/6] wait for /health  ──►  boot hooks, in order
+```
+
+The contract a hook may rely on, documented in the script itself: it runs as root with
+`$DATA_MOUNT`, `$DATA_DEVICE`, `$MODEL`, `$MODEL_FAMILY`, `$PORT`, `$REGION`,
+`$HEALTH_TIMEOUT` and `wait_loaded()` in scope, and with `set -euo pipefail` active, so a
+failing hook aborts the boot. Hooks must not redefine those names, and must not print step
+numbers of their own.
+
+A hook is opaque text, so Terraform cannot type-check it against the script. That gap is
+closed by `tests/boot_hooks`, which asserts the shipped hook keeps to the contract: it
+still verifies its pinned digest, still records `user_args`, still restarts the container
+once, does not redefine base names, and does not invent step labels.
+
+The shipped hook is `modules/strata-control-vector`: it fetches a pinned control vector,
+verifies its SHA-256, records the engine arguments as `user_args` plus
+`sampling.experimental_speed_projection` in the model's run config, and restarts the
+container once so the engine starts with the vector loaded. After that a caller chooses the
+behaviour per request, so one endpoint serves the model as published and the projected
+configuration. See [examples/nvfp4-uncensored](../examples/nvfp4-uncensored).
+
+Why a hook re-applies on every boot rather than once: the container regenerates the run
+settings when the card assignment changes (`docker/entrypoint.sh:206-216`) and tuning
+rewrites them, so anything recorded there is provisional until the next boot re-asserts it.
+This is also why the weights manifest deliberately ignores `install/`.
 
 ## Data Flow
 
