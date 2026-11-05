@@ -83,7 +83,7 @@ docker run --rm \
   -e "FAMILY=$FAMILY" \
   -e "TUNE=skip" \
   --entrypoint /opt/strata/terminal/bin/strata \
-  ghcr.io/niko1221/strata:latest-cuda13 \
+  ghcr.io/niko1221/strata:${strata_image_tag} \
   launch --no-tui --yes --no-start --model "$MODEL" --family "$FAMILY" \
   --data-dir /data 2>&1 || true
 
@@ -94,7 +94,7 @@ if [ ! -d "$DATA_DIR/Strata-data" ] && [ ! -d "$DATA_DIR/models" ]; then
   docker run --rm \
     -v "$DATA_DIR:/data" \
     --entrypoint /opt/strata/terminal/python/bin/python3 \
-    ghcr.io/niko1221/strata:latest-cuda13 \
+    ghcr.io/niko1221/strata:${strata_image_tag} \
     /opt/strata/terminal/setup.py --data-dir /data --model "$MODEL" --no-start
 fi
 

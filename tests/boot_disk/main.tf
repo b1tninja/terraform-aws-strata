@@ -45,10 +45,11 @@ locals {
   # The seeding script is the other half of the same hazard, and the more expensive half:
   # whatever it snapshots becomes the golden reference every later instance restores from.
   seed = replace(templatefile("${path.module}/../../modules/strata-data-snapshot/download-weights.sh.tpl", {
-    model         = "Qwen3-Next-80B-A3B-Instruct-NVFP4"
-    model_family  = "nvfp4"
-    volume_device = "/dev/sdf"
-    volume_id     = "vol-0123456789abcdef0"
+    model            = "Qwen3-Next-80B-A3B-Instruct-NVFP4"
+    model_family     = "nvfp4"
+    volume_device    = "/dev/sdf"
+    volume_id        = "vol-0123456789abcdef0"
+    strata_image_tag = "0.2.9-cuda13"
   }), "\r\n", "\n")
 
   seed_lines       = split("\n", local.seed)
@@ -265,6 +266,22 @@ resource "terraform_data" "splice_order" {
     precondition {
       condition     = !can(regex("strata-instance-store", local.script))
       error_message = "With no hooks rendered the boot script must not contain hook text; the module under test was spliced into the base script."
+    }
+  }
+}
+
+resource "terraform_data" "seed_image_pin" {
+  input = length(local.seed_lines)
+
+  lifecycle {
+    # This is the regression the suite did not cover: the seeding template had
+    # ghcr.io/niko1221/strata:latest-cuda13 written into it twice, so the weights were always
+    # fetched by a moving build however the caller pinned strata_image_tag - and the golden
+    # snapshot is the one artifact every later instance restores from, so a drifted download ends
+    # up baked into the reference rather than living in one disposable instance.
+    precondition {
+      condition     = !can(regex("strata:latest-", local.seed)) && can(regex("strata:0[.]2[.]9-cuda13", local.seed))
+      error_message = "The seeding script must resolve its image from the rendered strata_image_tag; a hardcoded moving tag means seeded weights came from a build nobody pinned."
     }
   }
 }

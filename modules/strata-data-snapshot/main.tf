@@ -8,8 +8,9 @@ variable "name_prefix" {
   default     = "strata-weights"
 }
 
+# tflint-ignore: terraform_unused_declarations
 variable "region" {
-  description = "AWS region"
+  description = "Inert, kept for interface stability: the region comes from the caller's provider block or AWS_REGION, never from a module input. The plan says so if it disagrees with the provider (check.region_matches_provider at the root module)."
   type        = string
   default     = "us-east-1"
 }
@@ -173,6 +174,11 @@ resource "aws_instance" "staging" {
     # The id, not the API device name, is what the script resolves the disk with: /dev/sdf is
     # what the attachment is told to use, which Nitro does not reproduce inside the instance.
     volume_id = aws_ebs_volume.staging.id
+    # The download runs inside the engine image, so it has to honour the pin like everything else
+    # does. This used to be hardcoded to latest-cuda13 in the template, which meant the weights
+    # were always fetched by a moving build even when the caller pinned a version - and the
+    # variable's own description claimed it derived this command.
+    strata_image_tag = var.strata_image_tag
   }), "\r\n", "\n")
 
   tags = merge(local.common_tags, { Name = "${var.name_prefix}-staging" })

@@ -9,13 +9,17 @@
 #
 # AMIs are REGION-scoped and automatically available from all AZs.
 # EBS snapshots are replicated across all AZs (stored in regional S3).
-# The only per-AZ operation needed is enabling Fast Snapshot Restore.
+# The only per-AZ operation needed is enabling Fast Snapshot Restore - and note that this module
+# does NOT do it. FSR is implemented in modules/strata-data-snapshot (aws_ebs_fast_snapshot_restore
+# over the weights snapshot); the variables below are accepted here for interface parity with that
+# module and currently change nothing. An earlier version of this comment claimed step 4 enabled
+# FSR, which was not true of the code.
 #
 # Lifecycle:
 #   1. Launch staging instance from this module
 #   2. It installs Docker + Strata image + downloads model weights
 #   3. Take an AMI from it (aws_ec2_ami creates incremental snapshots)
-#   4. Enable FSR on the data volume snapshot
+#   4. Enable FSR - NOT done here; use modules/strata-data-snapshot for the data snapshot
 #   5. Destroy staging instance
 #   6. Launch ephemeral production instances from the AMI
 #   7. To update: re-run the staging flow → new AMI (incremental, fast)
@@ -26,13 +30,16 @@ variable "name_prefix" {
   default     = "strata-ami"
 }
 
+# tflint-ignore: terraform_unused_declarations
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "Accepted for parity with modules/strata-data-snapshot. Inert: a module cannot set the region, which comes from the caller's provider block or AWS_REGION."
+  type        = string
+  default     = "us-east-1"
 }
 
+# tflint-ignore: terraform_unused_declarations
 variable "availability_zones" {
-  description = "AZs to enable FSR in (match your target deployment AZs)"
+  description = "Accepted for parity with modules/strata-data-snapshot. Inert HERE: this module creates no per-AZ resource. Fast Snapshot Restore is configured in modules/strata-data-snapshot, where the same variable drives aws_ebs_fast_snapshot_restore."
   type        = list(string)
   default     = ["us-east-1a"]
 }
@@ -80,8 +87,9 @@ variable "strata_image_tag" {
   default     = "0.2.9-cuda13"
 }
 
+# tflint-ignore: terraform_unused_declarations
 variable "enable_fsr" {
-  description = "Enable Fast Snapshot Restore on the data volume snapshot"
+  description = "Accepted for parity with modules/strata-data-snapshot. Inert HERE: nothing in this module creates a snapshot to restore quickly - aws_ebs_fast_snapshot_restore lives in modules/strata-data-snapshot. Kept so a caller written against either module does not fail on an unknown variable; set the real one there."
   type        = bool
   default     = true
 }
