@@ -9,21 +9,59 @@ echo "=== Weights download started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 MODEL="${model}"
 FAMILY="${model_family}"
 VOL_DEVICE="${volume_device}"
+VOL_ID="${volume_id}"
 DATA_DIR="/mnt/strata-data"
 
-# Wait for volume to attach
+# /dev/sdf is the name the attachment API was told to use, not necessarily the name this
+# operating system uses. On Nitro an EBS volume appears as an NVMe device, and on an
+# instance-store staging type the ephemeral disk can even claim a legacy name. Waiting for a
+# name that never appears means this script fails after five minutes of polling; formatting a
+# name that resolves to the wrong disk is worse, because whatever gets snapshotted here
+# becomes the golden reference that every later instance restores from.
+#
+# The volume id is unambiguous and it is known at plan time, because this module creates the
+# volume itself: Nitro exposes it as /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol0...,
+# Xen as /dev/disk/by-id/vol-... . The legacy name stays as a fallback, and is refused when
+# the kernel reports it as instance storage.
+resolve_volume() {
+  local id_no_dash cand
+  if [ -n "$VOL_ID" ]; then
+    id_no_dash=$(printf '%s' "$VOL_ID" | tr -d '-')
+    for cand in /dev/disk/by-id/*"$id_no_dash"*; do
+      if [ -e "$cand" ]; then realpath -m "$cand"; return 0; fi
+    done
+  fi
+  if [ -b "$VOL_DEVICE" ] && ! lsblk -dn -o NAME,MODEL "$VOL_DEVICE" 2>/dev/null | grep -qi 'instance storage'; then
+    echo "$VOL_DEVICE"
+    return 0
+  fi
+  return 1
+}
+
+RESOLVED_VOL=""
 for i in $(seq 1 60); do
-  [ -b "$VOL_DEVICE" ] && break
+  if RESOLVED_VOL=$(resolve_volume); then break; fi
   sleep 5
 done
 
-if [ ! -b "$VOL_DEVICE" ]; then
-  echo "ERROR: Volume $VOL_DEVICE not found"
+if [ -z "$RESOLVED_VOL" ]; then
+  echo "ERROR: volume $VOL_ID ($VOL_DEVICE) not found after 300s"
+  echo "       Looked in /dev/disk/by-id for the volume id, then for $VOL_DEVICE."
   exit 1
 fi
+if [ "$RESOLVED_VOL" != "$VOL_DEVICE" ]; then
+  echo "  Attachment name $VOL_DEVICE is $RESOLVED_VOL in this instance."
+fi
+VOL_DEVICE="$RESOLVED_VOL"
 
-# Format and mount
-mkfs.ext4 -L strata-weights "$VOL_DEVICE"
+# Format and mount. Formatting is skipped when a filesystem is already there: a retried run
+# must not destroy a volume that already holds a completed download, and this script has no
+# way to tell its own earlier attempt apart from someone else's disk.
+if blkid "$VOL_DEVICE" >/dev/null 2>&1; then
+  echo "  $VOL_DEVICE already carries a filesystem; not formatting it."
+else
+  mkfs.ext4 -L strata-weights "$VOL_DEVICE"
+fi
 mkdir -p "$DATA_DIR"
 mount "$VOL_DEVICE" "$DATA_DIR"
 

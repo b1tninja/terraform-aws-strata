@@ -39,6 +39,25 @@ locals {
   # line first identifies the disk, and which line first formats one.
   identify_lines = [for i, l in local.lines : i if can(regex("Data volume identified", l))]
   format_lines   = [for i, l in local.lines : i if can(regex("mkfs\\.ext4", l))]
+
+  # The seeding script is the other half of the same hazard, and the more expensive half:
+  # whatever it snapshots becomes the golden reference every later instance restores from.
+  seed = replace(templatefile("${path.module}/../../modules/strata-data-snapshot/download-weights.sh.tpl", {
+    model         = "Qwen3-Next-80B-A3B-Instruct-NVFP4"
+    model_family  = "nvfp4"
+    volume_device = "/dev/sdf"
+    volume_id     = "vol-0123456789abcdef0"
+  }), "\r\n", "\n")
+
+  seed_lines       = split("\n", local.seed)
+  resolve_lines    = [for i, l in local.seed_lines : i if can(regex("resolve_volume\\(\\)", l))]
+  seed_mkfs_lines  = [for i, l in local.seed_lines : i if can(regex("mkfs\\.ext4", l))]
+  seed_blkid_lines = [for i, l in local.seed_lines : i if can(regex("blkid", l))]
+
+  # Names that belong to these templates. If one survives rendering, a variable was added to a
+  # template but not to a renderer, and the shell would receive a literal dollar-brace string
+  # where a device name belongs.
+  placeholder_names = ["model_family", "volume_device", "volume_id", "data_volume_device", "boot_hooks", "verify_weights"]
 }
 
 resource "terraform_data" "disk_identification" {
@@ -128,6 +147,77 @@ resource "terraform_data" "script_hygiene" {
     precondition {
       condition     = can(regex("set -euo pipefail", local.script))
       error_message = "The hook contract documents set -euo pipefail as active; removing it silently changes what a hook may assume."
+    }
+  }
+}
+
+resource "terraform_data" "seeding_volume" {
+  input = length(local.seed)
+
+  lifecycle {
+    # Same hazard as the serving side, larger consequence: this script writes the volume whose
+    # snapshot every later instance restores from, and it used to poll for /dev/sdf - a name
+    # the attachment API is told to use, which Nitro does not reproduce inside the instance -
+    # then format whatever it found, unconditionally.
+    precondition {
+      condition = (
+        length(local.resolve_lines) > 0 &&
+        length(local.seed_mkfs_lines) > 0 &&
+        local.resolve_lines[0] < local.seed_mkfs_lines[0]
+      )
+      error_message = "The seeding script must resolve the volume before it formats anything."
+    }
+
+    precondition {
+      condition = (
+        length(local.seed_blkid_lines) > 0 &&
+        length(local.seed_mkfs_lines) > 0 &&
+        local.seed_blkid_lines[0] < local.seed_mkfs_lines[0]
+      )
+      error_message = "mkfs must be guarded by a filesystem check: a retried seeding run would otherwise wipe a volume that already holds a completed download."
+    }
+
+    precondition {
+      condition     = can(regex("/dev/disk/by-id/", local.seed))
+      error_message = "The seeding script must resolve the disk by volume id, because the API device name is not the name the OS uses on Nitro."
+    }
+
+    precondition {
+      condition     = can(regex("instance storage", local.seed))
+      error_message = "The legacy-name fallback must refuse a disk the kernel reports as instance storage."
+    }
+
+    # A dropped definition here is invisible to Terraform and fatal at boot: mount would
+    # target an empty path under set -u.
+    precondition {
+      condition     = can(regex("DATA_DIR=", local.seed))
+      error_message = "DATA_DIR must stay defined in the seeding script; mount would otherwise get an empty target."
+    }
+
+    # Proves the renderer really passes volume_id rather than the script defaulting to empty
+    # and silently falling back to name polling.
+    precondition {
+      condition     = can(regex("vol-0123456789abcdef0", local.seed))
+      error_message = "volume_id did not reach the rendered seeding script, so resolution would fall back to guessing by name."
+    }
+  }
+}
+
+resource "terraform_data" "rendering_integrity" {
+  input = length(local.placeholder_names)
+
+  lifecycle {
+    # Both scripts are rendered by templatefile(). A placeholder that survives rendering means
+    # someone added a template variable and updated one renderer but not the other, and the
+    # shell then receives a literal dollar-brace token where a device name or hook belongs.
+    precondition {
+      condition = alltrue([
+        for name in local.placeholder_names :
+        # Bracket classes rather than backslash escapes: [$][{]name[}] matches the literal
+        # text "${name}" without any escaping to get wrong, and Go's regexp rejects \" outright.
+        !can(regex("[$][{]" + name + "[}]", local.script)) && !can(regex("[$][{]" + name + "[}]", local.seed))
+      ])
+      error_message = "A template placeholder survived rendering; every renderer of boot.sh.tpl and download-weights.sh.tpl must supply every variable."
     }
   }
 }

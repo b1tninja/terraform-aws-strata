@@ -166,6 +166,9 @@ resource "aws_instance" "staging" {
     model         = var.model
     model_family  = var.model_family
     volume_device = "/dev/sdf"
+    # The id, not the API device name, is what the script resolves the disk with: /dev/sdf is
+    # what the attachment is told to use, which Nitro does not reproduce inside the instance.
+    volume_id = aws_ebs_volume.staging.id
   })
 
   tags = merge(local.common_tags, { Name = "${var.name_prefix}-staging" })
