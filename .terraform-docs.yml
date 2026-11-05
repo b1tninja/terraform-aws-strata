@@ -15,3 +15,12 @@ content: |
   {{ .Modules }}
 
   {{ .Resources }}
+
+# Write between the README's BEGIN_TF_DOCS / END_TF_DOCS markers instead of printing to
+# stdout. Without this block "make docs" reported success and changed nothing, while CI asked
+# terraform-docs to diff README.md - two different ideas about what the command does. mode
+# inject needs the markers to exist, and README carried BEGIN_TERRAFORM_DOCS, which is not the
+# string terraform-docs looks for; both now say BEGIN_TF_DOCS.
+output:
+  file: README.md
+  mode: inject
