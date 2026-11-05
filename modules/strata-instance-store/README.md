@@ -9,8 +9,9 @@ An instance in the `g7e`, `g6e`, `g5` or `g7` families ships local NVMe, and the
 close: `g7e.8xlarge` has 1,900 GiB of it, rated **275,000 read / 137,500 write IOPS**, included in
 the hourly price (Vantage instance data, 2026-11-05). The data volume is gp3, which *includes*
 3,000 IOPS and 125 MiB/s - anything above that baseline is provisioned and billed by the month
-against a volume that lives for an hour. (The instance's own EBS path is capped at 16,000 Mbps on
-that type, so a large single volume cannot even reach its volume-level limit.)
+against a volume that lives for an hour. (That type's EBS path tops out at 16,000 Mbps and
+64,000 IOPS, which is exactly where gp3's own ceiling sits, so the instance is not what limits a
+single volume here.)
 
 That gap only matters for packs that read from SSD while serving. Most packs in the catalog
 keep every expert resident in RAM and touch the disk only at load; for those, local NVMe buys

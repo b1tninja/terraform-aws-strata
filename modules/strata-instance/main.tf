@@ -234,6 +234,10 @@ resource "aws_instance" "this" {
   metadata_options {
     http_endpoint = "enabled"
     http_tokens   = "required"
+    # Explicit 1: containers on this host must not reach IMDS, because the instance profile can
+    # read the API key from Secrets Manager. See the note in the root module's metadata_options -
+    # an AMI registered with imds-support = v2.0 would otherwise raise this to 2 silently.
+    http_put_response_hop_limit = 1
   }
 
   root_block_device {

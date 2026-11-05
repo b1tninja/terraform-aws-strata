@@ -215,13 +215,24 @@ Three levers beyond instance choice:
 
 - **Idle cost dominates.** `ttl_minutes` plus the EventBridge scheduler terminate the
   instance at TTL expiry; a forgotten `g7e` costs more in a day than the whole pipeline.
-- **Fast Snapshot Restore is a standing charge** per enabled availability zone while it is
-  on, not per use. `enable_fsr` exists on both snapshot paths; turn it on to launch and off
-  when you stop. Provisioned rate for volume initialization is the pay-per-create
-  alternative (AWS illustrates it at roughly $0.0036 per GB of snapshot at 300 MB/s,
-  region-dependent) if you only restore occasionally.
-- **Volumes are cheap, hours are not.** gp3 is $0.08 per GB-month with 3,000 IOPS included,
-  so keeping several model snapshots is a rounding error next to one wasted GPU hour.
+- **Fast Snapshot Restore is the most expensive thing in this repository that isn't a GPU.** AWS
+  bills it **per snapshot, per availability zone, per minute it is enabled**, pro-rated with a
+  one-hour minimum — the documented example is 1 snapshot in 1 AZ for a month at **$540**
+  ($0.75/hr). That is about 170 hours of `g7e.8xlarge` spot, so leaving `enable_fsr` on
+  over a quiet month costs more than running the model. Constraints that matter here:
+  **5 snapshots per region** can be enabled at all; a snapshot must be **16 TiB or smaller**;
+  enabling does **not** propagate to a copy or to a snapshot taken from a restored volume
+  (`modules/strata-volume-snapshot` re-enables it deliberately for that reason); full benefit
+  only applies to volumes provisioned up to **64,000 IOPS / 1,000 MiB/s**, and AWS recommends
+  initializing beyond that yourself; and the number of volumes that actually get the benefit is
+  capped by the snapshot's **volume creation credits**, which is what a spot fleet launching
+  many instances at once consumes. Provisioned rate for volume initialization is the
+  pay-per-create alternative (AWS illustrates it at roughly $0.0036 per GB of snapshot at
+  300 MB/s, region-dependent) if you only restore occasionally.
+- **Volumes are cheap, hours are not.** gp3 is $0.08 per GB-month with 3,000 IOPS and
+  125 MiB/s included; extra IOPS is billed on top and needs at least 500 IOPS per GiB of
+  volume size (so the 80,000 ceiling only exists on volumes 160 GiB and larger). Keeping
+  several model snapshots is a rounding error next to one wasted GPU hour - or next to FSR.
 
 ## Security & Lifecycle
 
@@ -279,7 +290,7 @@ hand; it is rewritten in place._
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | EC2 instance type. See docs/MODELS.md for recommendations per model. | `string` | `"g6e.8xlarge"` | no |
 | <a name="input_key_pair_name"></a> [key\_pair\_name](#input\_key\_pair\_name) | EC2 key pair name for SSH access (optional) | `string` | `""` | no |
 | <a name="input_kv_quantization"></a> [kv\_quantization](#input\_kv\_quantization) | KV cache quantization (int8, q4\_0, k8v4, fp16) | `string` | `"int8"` | no |
-| <a name="input_min_driver_version"></a> [min\_driver\_version](#input\_min\_driver\_version) | Fail the boot if the instance's NVIDIA driver is older than this, e.g. "570.00". Empty (the<br/>default) means the boot logs the driver version it found and carries on.<br/><br/>Worth setting once measured, because a driver older than the image tag's CUDA build does not<br/>fail at plan time: the container starts, the engine reports an insufficient driver version, and<br/>the instance bills while it does. No default is imposed here - NVIDIA's CUDA-to-driver table<br/>was not confirmable from the environment this module was written in, and a guessed floor would<br/>fail deployments that work fine. | `string` | `""` | no |
+| <a name="input_min_driver_version"></a> [min\_driver\_version](#input\_min\_driver\_version) | Extra floor for the boot-time driver check, e.g. "580.126.04". Empty (the default) does NOT<br/>mean unchecked: the boot already derives a floor from the image tag using NVIDIA's published<br/>compatibility table - CUDA 13.x needs driver >= 580, CUDA 12.x needs >= 525 - and refuses to<br/>start the container below it. Set this only to raise the requirement further; a value below<br/>the tag's own floor is ignored, because that floor is not a preference.<br/><br/>The reason this is enforced at boot rather than at plan: a driver older than the image's CUDA<br/>build produces no plan-time error. The container starts, the engine reports an insufficient<br/>driver version, and the instance bills while it does. | `string` | `""` | no |
 | <a name="input_model"></a> [model](#input\_model) | Strata model identifier (e.g. IQ3\_XXS, Q2\_0, IQ2\_XS, UD-Q6\_K\_XL, NVFP4). The catalog in modules/strata-catalog lists every accepted value and derives the volume size from it. | `string` | `"IQ3_XXS"` | no |
 | <a name="input_model_family"></a> [model\_family](#input\_model\_family) | Model family: qwen, swift, coder, unsloth, gyro, nvfp4 or deepseek41 | `string` | `"qwen"` | no |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | Prefix for all resource names | `string` | `"strata"` | no |

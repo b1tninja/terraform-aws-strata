@@ -288,21 +288,22 @@ variable "boot_hooks" {
 
 variable "min_driver_version" {
   description = <<-EOT
-    Fail the boot if the instance's NVIDIA driver is older than this, e.g. "570.00". Empty (the
-    default) means the boot logs the driver version it found and carries on.
+    Extra floor for the boot-time driver check, e.g. "580.126.04". Empty (the default) does NOT
+    mean unchecked: the boot already derives a floor from the image tag using NVIDIA's published
+    compatibility table - CUDA 13.x needs driver >= 580, CUDA 12.x needs >= 525 - and refuses to
+    start the container below it. Set this only to raise the requirement further; a value below
+    the tag's own floor is ignored, because that floor is not a preference.
 
-    Worth setting once measured, because a driver older than the image tag's CUDA build does not
-    fail at plan time: the container starts, the engine reports an insufficient driver version, and
-    the instance bills while it does. No default is imposed here - NVIDIA's CUDA-to-driver table
-    was not confirmable from the environment this module was written in, and a guessed floor would
-    fail deployments that work fine.
+    The reason this is enforced at boot rather than at plan: a driver older than the image's CUDA
+    build produces no plan-time error. The container starts, the engine reports an insufficient
+    driver version, and the instance bills while it does.
   EOT
   type        = string
   default     = ""
 
   validation {
     condition     = var.min_driver_version == "" || can(regex("^[0-9]+(\\.[0-9]+){0,2}$", var.min_driver_version))
-    error_message = "min_driver_version must be empty or a dotted numeric version such as 570.124.04."
+    error_message = "min_driver_version must be empty or a dotted numeric version such as 580.65.06."
   }
 }
 

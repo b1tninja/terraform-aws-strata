@@ -315,6 +315,13 @@ resource "terraform_data" "driver_gate" {
       condition     = can(regex("MIN_DRIVER=", local.script)) && !can(regex("MIN_DRIVER=[0-9]", local.script))
       error_message = "min_driver_version must render empty by default: an unconfirmed floor would refuse working boots."
     }
+    # The floor has to come from the chosen tag and NVIDIA's published table (CUDA 13.x needs
+    # driver >= 580, CUDA 12.x needs >= 525), not from a number this repository invents. Patterns
+    # use . for the quote characters rather than escaping them inside the HCL string.
+    precondition {
+      condition     = can(regex("CUDA_FLOOR=.580", local.script)) && can(regex("CUDA_FLOOR=.525", local.script))
+      error_message = "The boot must derive the driver floor from the image tag's CUDA family (580 for cuda13, 525 for cuda12)."
+    }
   }
 }
 

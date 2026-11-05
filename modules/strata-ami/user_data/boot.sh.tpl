@@ -205,15 +205,13 @@ else
 fi
 
 # The GPU name is informational; the driver version decides whether the engine runs at all.
-# Strata publishes engine packages for CUDA 12 and CUDA 13 (ghcr tags such as 0.2.9-cuda12 and
-# 0.2.9-cuda13) and an engine built against a newer toolkit than the AMI's driver supports is not
-# a plan-time failure - the container starts, the engine reports an insufficient driver version,
-# and the instance bills while it does. The AMI is chosen by data source, so this is the first
-# point at which the real number can be seen, and it goes into the boot log on every instance.
-#
-# There is deliberately no default floor. NVIDIA's CUDA-to-driver table could not be confirmed
-# from the environment this was written in, and a guessed minimum would fail boots that work
-# fine. Set min_driver_version once you know what your image tag needs.
+# NVIDIA's own compatibility table (CUDA Compatibility, Table 1) states the floors:
+#   CUDA 13.x  -> minimum driver 580     (580.65.06 shipped with CUDA 13.0)
+#   CUDA 12.x  -> minimum driver 525     (minor-version compatibility below 580)
+# Strata publishes engine images for both (ghcr tags <version>-cuda12 and <version>-cuda13), so the
+# floor can be derived from the tag that was chosen rather than guessed. A driver below the floor
+# is not a plan-time failure and not a cheap one: the container starts, the engine reports an
+# insufficient driver version, and the instance bills while it does.
 DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1)
 if [ -z "$DRIVER_VER" ] && [ -r /proc/driver/nvidia/version ]; then
   DRIVER_VER=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' /proc/driver/nvidia/version | head -n 1)
@@ -223,15 +221,31 @@ if [ -z "$DRIVER_VER" ]; then
   echo "  WARNING: no NVIDIA driver version reported; --gpus all will fail in the next step."
 else
   echo "  NVIDIA driver $DRIVER_VER"
+  case "$STRATA_IMAGE_TAG" in
+    *-cuda13) CUDA_FLOOR="580" ;;
+    *-cuda12) CUDA_FLOOR="525" ;;
+    *) CUDA_FLOOR="" ;;
+  esac
   MIN_DRIVER="${min_driver_version}"
-  if [ -n "$MIN_DRIVER" ]; then
-    # sort -V rather than string comparison: "9.1" against "10.2" is decided wrongly by the latter.
-    lowest=$(printf '%s\n%s\n' "$MIN_DRIVER" "$DRIVER_VER" | sort -V | head -n 1)
-    if [ "$lowest" != "$MIN_DRIVER" ]; then
-      echo "ERROR: driver $DRIVER_VER is below min_driver_version $MIN_DRIVER for tag $STRATA_IMAGE_TAG."
-      echo "       Use an AMI with a newer driver, or the -cuda12 image for this tag if it exists."
+  if [ -n "$CUDA_FLOOR" ] && [ -n "$MIN_DRIVER" ]; then
+    # Two floors, take the higher: an override below the toolkit's requirement is a mistake, and
+    # one above it is the caller knowing something this script does not.
+    FLOOR=$(printf '%s\n%s\n' "$CUDA_FLOOR" "$MIN_DRIVER" | sort -V | tail -n 1)
+  elif [ -n "$CUDA_FLOOR" ]; then
+    FLOOR="$CUDA_FLOOR"
+  else
+    FLOOR="$MIN_DRIVER"
+  fi
+  if [ -n "$FLOOR" ]; then
+    # sort -V rather than string comparison: "9.1" sorts above "10.2" as a string.
+    lowest=$(printf '%s\n%s\n' "$FLOOR" "$DRIVER_VER" | sort -V | head -n 1)
+    if [ "$lowest" != "$FLOOR" ]; then
+      echo "ERROR: driver $DRIVER_VER is below the $FLOOR floor for image tag $STRATA_IMAGE_TAG."
+      echo "       NVIDIA requires >=580 to run CUDA 13 builds and >=525 for CUDA 12."
+      echo "       Choose an AMI with a newer driver, or the -cuda12 variant of this tag."
       exit 1
     fi
+    echo "  Driver satisfies the $FLOOR floor for $STRATA_IMAGE_TAG."
   fi
 fi
 

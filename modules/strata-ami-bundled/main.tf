@@ -202,6 +202,11 @@ resource "aws_instance" "staging" {
   metadata_options {
     http_endpoint = "enabled"
     http_tokens   = "required"
+    # Explicit 1, same reasoning as the root module: this is the staging instance that pulls the
+    # engine image and writes the golden snapshot, and its profile has more permissions than the
+    # production instance does. Keeping the hop limit at 1 means nothing that runs inside a
+    # container on it can use those credentials.
+    http_put_response_hop_limit = 1
   }
 
   root_block_device {

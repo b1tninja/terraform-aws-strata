@@ -285,6 +285,15 @@ resource "aws_launch_template" "strata" {
   metadata_options {
     http_endpoint = "enabled"
     http_tokens   = "required"
+    # Stated as 1 rather than inherited. AWS documents that "in a container environment, a hop
+    # limit of 1 can cause issues" - for this module that is the control working, not a defect: the
+    # instance profile is allowed to read the API key from Secrets Manager, so a hop limit of 2
+    # would hand anything running inside the engine container a route to those credentials.
+    #
+    # It has to be written down because it is not stable by inheritance: an AMI registered with
+    # imds-support = v2.0 gets a hop limit of 2 automatically, and account-level defaults can set
+    # one too, so "whatever the default is" is not a security posture.
+    http_put_response_hop_limit = 1
   }
 
   tag_specifications {
