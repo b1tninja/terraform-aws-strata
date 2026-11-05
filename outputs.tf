@@ -59,3 +59,25 @@ output "ttl_terminate_schedule_arn" {
   description = "EventBridge Scheduler schedule that terminates the instance at TTL expiry (null when disabled)"
   value       = local.scheduler_enabled ? aws_scheduler_schedule.ttl_terminate[0].arn : null
 }
+
+output "uncensored" {
+  description = "Whether this deployment applies the control vector, i.e. serves the model as its second configuration"
+  value       = var.uncensored
+}
+
+output "control_vector" {
+  description = <<-EOT
+    What was pinned for the control vector, so a reviewer can confirm the bytes this
+    deployment will fetch. The model, the weights volume and the image are identical to
+    a stock deployment: only these few hundred kilobytes differ.
+  EOT
+  value = {
+    source_commit = local.uncensor_ref
+    download_base = local.uncensor_base
+    vector_file   = local.uncensor_vector
+    vector_sha256 = local.uncensor_files[local.uncensor_vector]
+    engine_args   = local.uncensor_recipe
+    licence       = try(module.catalog.model_entry.license, "unknown")
+  }
+}
+

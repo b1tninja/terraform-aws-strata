@@ -153,6 +153,11 @@ locals {
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
+    uncensored           = var.uncensor == null ? "false" : tostring(var.uncensor.enabled)
+    uncensor_base        = var.uncensor == null ? "" : var.uncensor.base
+    uncensor_file_pins   = var.uncensor == null ? "" : var.uncensor.file_pins
+    uncensor_args_json   = var.uncensor == null ? "[]" : var.uncensor.args_json
+    uncensor_vector      = var.uncensor == null ? "" : var.uncensor.vector
   }), "\r\n", "\n")
 
   common_tags = merge(var.tags, {

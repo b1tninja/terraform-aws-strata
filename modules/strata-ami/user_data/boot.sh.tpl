@@ -28,8 +28,18 @@ TTL_MINUTES=${ttl_minutes}
 REGION="${region}"
 IMDS_TOKEN=""
 
+# Control vector (the second configuration of the same weights). Pins live in
+# uncensor.tf; UNCENSOR_FILES is "name:sha256 ..." and UNCENSOR_ARGS the engine
+# arguments recorded as user_args in the model's run config.
+UNCENSORED="${uncensored}"
+UNCENSOR_BASE="${uncensor_base}"
+UNCENSOR_FILES="${uncensor_file_pins}"
+UNCENSOR_ARGS='${uncensor_args_json}'
+UNCENSOR_VECTOR="${uncensor_vector}"
+
+
 # ─── Mount data volume ─────────────────────────────────────────────────────────
-echo "[1/6] Mounting data volume..."
+echo "[1/7] Mounting data volume..."
 mkdir -p "$DATA_MOUNT"
 
 for i in $(seq 1 30); do
@@ -55,7 +65,7 @@ fi
 grep -q "$DATA_DEVICE" /etc/fstab || echo "$DATA_DEVICE $DATA_MOUNT ext4 defaults,noatime 0 2" >> /etc/fstab
 
 # ─── Ensure Docker + nvidia-container-toolkit ──────────────────────────────────
-echo "[2/6] Checking runtime prerequisites..."
+echo "[2/7] Checking runtime prerequisites..."
 
 if ! command -v docker &>/dev/null; then
   echo "  Docker not found — installing..."
@@ -84,7 +94,7 @@ fi
 
 # ─── Resolve the API key ───────────────────────────────────────────────────────
 if [ "$USE_SECRETS_MANAGER" = "true" ]; then
-  echo "[3/6] Fetching API key from Secrets Manager..."
+  echo "[3/7] Fetching API key from Secrets Manager..."
 
   for tool in aws jq; do
     if ! command -v "$tool" &>/dev/null; then
@@ -111,15 +121,15 @@ if [ "$USE_SECRETS_MANAGER" = "true" ]; then
   fi
   echo "  API key resolved (value intentionally not logged)."
 else
-  echo "[3/6] Using API key from user_data."
+  echo "[3/7] Using API key from user_data."
 fi
 
 # ─── Pull Strata Docker image (cached in AMI if pre-baked) ─────────────────────
-echo "[4/6] Pulling Strata image: ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG"
+echo "[4/7] Pulling Strata image: ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG"
 docker pull "ghcr.io/niko1221/strata:$STRATA_IMAGE_TAG" || true
 
 # ─── Start container ───────────────────────────────────────────────────────────
-echo "[5/6] Starting Strata container..."
+echo "[5/7] Starting Strata container..."
 
 # Env goes through a 0600 file: `docker run -e API_KEY=secret` would expose the key
 # in the process list and in `docker inspect`.
@@ -152,24 +162,93 @@ docker run -d --rm \
 echo "  Container started."
 
 # ─── Health check ──────────────────────────────────────────────────────────────
-echo "[6/6] Waiting for model to load (timeout: $HEALTH_TIMEOUT s)..."
-START_TIME=$(date +%s)
+wait_loaded() {
+  local start elapsed health
+  start=$(date +%s)
+  while true; do
+    elapsed=$(( $(date +%s) - start ))
+    if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
+      echo "  TIMEOUT after $elapsed s"
+      docker logs strata --tail 30 2>/dev/null || true
+      return 1
+    fi
+    health=$(curl -sf "http://localhost:$PORT/health" 2>/dev/null || echo "{}")
+    if echo "$health" | grep -q '"loaded":true'; then
+      echo "  Model ready after $elapsed s"
+      return 0
+    fi
+    sleep 5
+  done
+}
 
-while true; do
-  ELAPSED=$(( $(date +%s) - START_TIME ))
-  if [ "$ELAPSED" -ge "$HEALTH_TIMEOUT" ]; then
-    echo "  TIMEOUT after $ELAPSED s"
-    docker logs strata --tail 30 2>/dev/null || true
+echo "[6/7] Waiting for model to load (timeout: $HEALTH_TIMEOUT s)..."
+wait_loaded || exit 1
+
+# ─── The second configuration of the same weights ──────────────────────────────
+# Nothing here downloads or converts a model. The vector is a few hundred KB, and it
+# is recorded in the model's run config as user_args, which serve/server.py merges
+# over the generated engine arguments every time the server starts. The container is
+# then restarted so the engine picks them up, and it serves the SAME model directory
+# under a name ending in -uncensored.
+if [ "$UNCENSORED" = "true" ]; then
+  echo "[7/7] Applying control vector: one model, two configurations..."
+
+  command -v jq >/dev/null 2>&1 || {
+    apt-get update -qq
+    apt-get install -y -qq jq >/dev/null
+  }
+
+  VECTOR_DIR="$DATA_MOUNT/uncensor"
+  mkdir -p "$VECTOR_DIR"
+
+  # UNCENSOR_FILES is "name:sha256 name:sha256 ...", pinned by Terraform.
+  for entry in $UNCENSOR_FILES; do
+    name=$(printf '%s' "$entry" | cut -d: -f1)
+    digest=$(printf '%s' "$entry" | cut -d: -f2)
+
+    if [ ! -f "$VECTOR_DIR/$name" ]; then
+      echo "  Fetching $name"
+      curl -fsSL --retry 5 --retry-delay 5 -o "$VECTOR_DIR/$name.part" "$UNCENSOR_BASE/$name"
+    fi
+    if ! printf '%s  %s.part\n' "$digest" "$name" | (cd "$VECTOR_DIR" && sha256sum --check --status -); then
+      echo "ERROR: SHA-256 mismatch for $name - refusing to use it"
+      rm -f "$VECTOR_DIR/$name.part"
+      exit 1
+    fi
+    mv "$VECTOR_DIR/$name.part" "$VECTOR_DIR/$name"
+  done
+
+  # The engine runs as uid 10001 and only reads these, but the directory must be
+  # traversable and the files readable for it to do even that.
+  chmod -R a+rX "$VECTOR_DIR"
+
+  CONFIG=""
+  for candidate in "$DATA_MOUNT"/install/strata-*.json; do
+    if [ -f "$candidate" ]; then CONFIG="$candidate"; fi
+  done
+  if [ -z "$CONFIG" ]; then
+    echo "ERROR: no run config under $DATA_MOUNT/install to attach the vector to"
     exit 1
   fi
 
-  HEALTH=$(curl -sf "http://localhost:$PORT/health" 2>/dev/null || echo "{}")
-  if echo "$HEALTH" | grep -q '"loaded":true'; then
-    echo "  Model ready after $ELAPSED s!"
-    break
-  fi
-  sleep 5
-done
+  BASE_NAME=$(jq -r '.model_name // "strata"' "$CONFIG")
+  case "$BASE_NAME" in
+    *-uncensored) VARIANT_NAME="$BASE_NAME" ;;
+    *) VARIANT_NAME="$BASE_NAME-uncensored" ;;
+  esac
+
+  TMP_CONFIG=$(mktemp)
+  jq --argjson ua "$UNCENSOR_ARGS" --arg name "$VARIANT_NAME" \
+    '.user_args = $ua | .model_name = $name' "$CONFIG" >"$TMP_CONFIG"
+  # cat, not mv: keeps the file's inode and permissions, which the container holds open.
+  cat "$TMP_CONFIG" >"$CONFIG"
+  rm -f "$TMP_CONFIG"
+  echo "  $CONFIG now serves $VARIANT_NAME"
+
+  docker restart strata >/dev/null
+  wait_loaded || exit 1
+  echo "  Serving $VARIANT_NAME from the same weights as the stock configuration."
+fi
 
 # ─── Connection info ───────────────────────────────────────────────────────────
 PUBLIC_IP=$(curl -sf -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \

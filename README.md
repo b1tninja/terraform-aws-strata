@@ -15,6 +15,42 @@ Strata runs massive MoE models (Qwen3.8-Flash-Next, DeepSeek V4.1) by distributi
 terraform apply → wait 90s → POST /v1/chat/completions → terraform destroy
 ```
 
+## One model, two configurations
+
+The routed experts are the expensive part: `NVFP4` is 128 GB of weights. Whether the
+model declines your requests or not is decided by a **267,552-byte** control vector that
+the engine applies while loading them, so the same weights, the same volume, the same
+snapshot and the same image serve two configurations. The difference is one boolean:
+
+```hcl
+module "strata" {
+  source        = "github.com/b1tninja/terraform-aws-strata"
+  instance_type = "g7e.8xlarge"   # sm_120: FP4 tensor cores
+  model         = "NVFP4"
+  model_family  = "nvfp4"
+
+  uncensored    = true            # 261 KiB of steering, not a second 128 GB model
+}
+```
+
+`/v1/models` then reports `strata-nvfp4-nvfp4-uncensored` instead of
+`strata-nvfp4-nvfp4`. Nothing is re-downloaded: the instance fetches the vector from a
+pinned commit, verifies its SHA-256, records it as `user_args` in the model's run config
+— the one documented channel that survives the engine rewriting that file — and restarts
+the container once, costing about a minute of extra boot time.
+
+| | stock | uncensored |
+|---|---|---|
+| weights | 128 GB | *the same* 128 GB |
+| extra bytes | — | **261 KiB** |
+| served name | `strata-nvfp4-nvfp4` | `strata-nvfp4-nvfp4-uncensored` |
+
+Plan fails unless the pack is the NVFP4 GPTQ one the vector was measured on **and** its
+licence permits it: NVIDIA's `NVFP4-NVIDIA` / `NVFP4-QAD` packs are refused, exactly as
+strata-launcher refuses them. Walkthrough:
+[`examples/nvfp4-uncensored`](examples/nvfp4-uncensored); for both configurations at once
+from a single snapshot, [`examples/one-snapshot-two-configs`](examples/one-snapshot-two-configs).
+
 ## Quick Start
 
 ```hcl
@@ -57,6 +93,9 @@ before loading a model.
 | `g6.*` | NVIDIA L4 (24GB) | 8.9 (Ada) | ✅ Works |
 | `g5.*` | NVIDIA A10G (24GB) | 8.6 (Ampere) | ✅ Works |
 | `p5.*` `p5e.*` `p5en.*` | H100 / H200 | 9.0 (Hopper) | ❌ No engine package |
+| [nvfp4-uncensored](examples/nvfp4-uncensored) | Same weights + control vector | The second configuration of one model |
+| [one-snapshot-two-configs](examples/one-snapshot-two-configs) | Two endpoints, one weights snapshot | Both configurations side by side |
+
 | `p6-b200.*` `p6-b300.*` `p6e-gb200.*` | B200 / B300 / GB200 | 10.x | ❌ No engine package |
 | `g5g.*` | Graviton + GPU | arm64 | ❌ Images are x86-64, need AVX2 |
 
