@@ -133,9 +133,24 @@ resource "terraform_data" "audit" {
       error_message = "NVFP4 is one of the packs the vector was measured on, so applicability must say so."
     }
 
+    # 9 tokens, not 8: the recipe is --control-vector-scaled <path> (2),
+    # --control-vector-layer-range 8 33 (3), --cvec-mode project (2), --cvec-dir per-layer (2).
+    # This counted wrong and the dir could not even plan until its local module was installed,
+    # which is how a failing assertion sat unnoticed. Shape is checked as well as length, so a
+    # future edit fails with a message that says which piece moved.
     precondition {
-      condition     = length(module.steer.control_vector.engine_args) == 8
-      error_message = "The engine recipe must stay the pinned 8 arguments: scaled path, layer range 8 33, cvec-mode, cvec-dir."
+      condition = (
+        length(module.steer.control_vector.engine_args) == 9 &&
+        module.steer.control_vector.engine_args[0] == "--control-vector-scaled" &&
+        module.steer.control_vector.engine_args[2] == "--control-vector-layer-range" &&
+        module.steer.control_vector.engine_args[3] == "8" &&
+        module.steer.control_vector.engine_args[4] == "33" &&
+        contains(module.steer.control_vector.engine_args, "project") &&
+        contains(module.steer.control_vector.engine_args, "per-layer") &&
+        !contains(module.steer.control_vector.engine_args, "remove") &&
+        !contains(module.steer.control_vector.engine_args, "pos-neg")
+      )
+      error_message = "The engine recipe must be the measured one: scaled path, layer range 8 33, cvec-mode project, cvec-dir per-layer. remove/pos-neg is upstream's stale prose, not the shipped arguments."
     }
 
     precondition {
