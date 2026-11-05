@@ -322,6 +322,15 @@ resource "aws_instance" "strata" {
   subnet_id                   = local.effective_subnet_id
   associate_public_ip_address = var.associate_public_ip
 
+  # Stated here rather than inherited from aws_launch_template.strata, where it is also set. The
+  # template is what supplies every other setting - "Parameters configured on this resource will
+  # override" (provider docs) - but this one is worth duplicating: hashicorp/terraform-provider-aws
+  # #21502 documented an aws_instance created from a launch_template losing its iam_instance_profile
+  # on a second run. A missing profile is not a loud failure here. It removes the instance's ability
+  # to call secretsmanager:GetSecretValue, so the boot cannot fetch the API key and the engine comes
+  # up unauthenticated - which reads like a Strata fault, not a Terraform one.
+  iam_instance_profile = aws_iam_instance_profile.strata.name
+
   tags = merge(local.common_tags, { Name = "${var.name_prefix}-instance" })
 }
 
@@ -337,6 +346,12 @@ resource "aws_instance" "strata_spot" {
 
   subnet_id                   = local.effective_subnet_id
   associate_public_ip_address = var.associate_public_ip
+
+  # Same reason as aws_instance.strata: the profile is duplicated rather than relied upon from the
+  # launch template. Spot capacity is the path where instances are replaced most often, so a
+  # read-back bug that drops the profile would surface here first - and it surfaces as an
+  # unauthenticated server, hours of GPU billing, and no error at plan time.
+  iam_instance_profile = aws_iam_instance_profile.strata.name
 
   instance_market_options {
     market_type = "spot"

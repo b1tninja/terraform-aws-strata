@@ -249,6 +249,22 @@ reaches the container through a `0600` `--env-file`. To read it back:
 terraform output api_key
 ```
 
+### Two things Terraform will not tell you
+
+- **Containers on the instance cannot reach IMDS, on purpose.** `metadata_options` sets
+  `http_put_response_hop_limit = 1`. AWS documents that a hop limit of 1 "can cause issues" in
+  container environments; here that is the control, because the instance profile is allowed to read
+  the API key from Secrets Manager and a hop limit of 2 would hand anything inside the engine image
+  that same credential. It also has to be written down rather than inherited: an AMI registered with
+  `imds-support = v2.0` gets a hop limit of 2 automatically.
+- **Block-device changes on a running instance are invisible to the plan.** The provider documents
+  that `encrypted` "must be configured to perform drift detection" and that "changes to the
+  `ebs_block_device` configuration of _existing_ resources cannot be automatically detected by
+  Terraform". So editing volume size or IOPS and re-applying can report no changes while AWS holds
+  something else. This module's answer is to replace rather than mutate — instances are ephemeral and
+  the durable artifacts are the snapshot and the AMI — so treat an existing instance as disposable
+  instead of trying to tune it in place.
+
 ## Why Not SageMaker / Bedrock
 
 Strata's architecture needs:
