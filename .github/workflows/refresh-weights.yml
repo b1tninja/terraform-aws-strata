@@ -67,16 +67,27 @@ jobs:
 
       - name: Create staging environment
         run: |
+          # Scoped with -target below so the snapshot is NOT created here: aws_ebs_snapshot.weights
+          # depends only on the volume, so an unscoped apply snapshots a volume whose download the
+          # next step is still waiting on. The snapshot and FSR are created after the marker appears.
           terraform init
           terraform apply -auto-approve \
             -var="model=${{ inputs.model }}" \
             -var="model_family=${{ inputs.model_family }}" \
             -var="volume_size=${{ inputs.volume_size_gib }}" \
             -var="availability_zones=[\"${{ inputs.availability_zone }}\"]" \
-            -var="staging_subnet_id=${{ vars.STAGING_SUBNET_ID }}"
+            -var="staging_subnet_id=${{ vars.STAGING_SUBNET_ID }}" \
+            -target=aws_security_group.staging \
+            -target=aws_ebs_volume.staging \
+            -target=aws_volume_attachment.staging \
+            -target=aws_instance.staging
         working-directory: modules/strata-data-snapshot
 
       - name: Wait for download to complete
+        # No continue-on-error here on purpose. If this step cannot confirm the marker, the next
+        # step would snapshot whatever the volume happens to contain and publish that ID to SSM as
+        # the reference for every future instance - a silent data-quality failure, which is worse
+        # than a red run.
         run: |
           INSTANCE_ID=$(cd modules/strata-data-snapshot && terraform output -json | jq -r '.staging_instance_id.value // empty')
           if [ -z "$INSTANCE_ID" ]; then
@@ -84,9 +95,11 @@ jobs:
             sleep 120
             INSTANCE_ID=$(cd modules/strata-data-snapshot && terraform output -json | jq -r '.staging_instance_id.value')
           fi
+          [ -n "$INSTANCE_ID" ] || { echo "::error::no staging instance id; cannot verify the download"; exit 1; }
           echo "Monitoring instance: $INSTANCE_ID"
-          
+
           # Poll for the completion marker via SSM
+          COMPLETE=""
           for i in $(seq 1 180); do
             RESULT=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
@@ -101,13 +114,18 @@ jobs:
                 --query "StandardOutputContent" --output text 2>/dev/null || echo "IN_PROGRESS")
               if echo "$OUTPUT" | grep -q "COMPLETE"; then
                 echo "Download complete: $OUTPUT"
+                COMPLETE="yes"
                 break
               fi
             fi
             echo "Still downloading... ($i/180)"
             sleep 30
           done
-        continue-on-error: true
+
+          if [ -z "$COMPLETE" ]; then
+            echo "::error::download marker never appeared; refusing to snapshot a partial volume"
+            exit 1
+          fi
 
       - name: Create snapshot
         run: |
@@ -135,10 +153,11 @@ jobs:
             --overwrite
 
       - name: Teardown staging instance (keep volume + snapshot)
+        # aws_volume_attachment, not aws_ebs_attachment: that type does not exist, so this destroy
+        # failed with an invalid target entry - and continue-on-error: true had been turning that
+        # into a green step while the staging instance kept running and billing.
         run: |
-          # Destroy just the instance, the snapshot remains
           terraform destroy -auto-approve \
             -target=aws_instance.staging \
-            -target=aws_ebs_attachment.staging
+            -target=aws_volume_attachment.staging
         working-directory: modules/strata-data-snapshot
-        continue-on-error: true

@@ -212,12 +212,15 @@ resource "aws_security_group" "staging" {
 resource "aws_ebs_snapshot" "weights" {
   volume_id = aws_ebs_volume.staging.id
 
-  # Wait until the staging instance signals completion before snapshotting.
-  # In practice, this is coordinated by the CI workflow calling terraform apply
-  # in phases, or by a null_resource that polls SSM Run Command output.
-  lifecycle {
-    ignore_changes = [volume_id]
-  }
+  # Ordering is enforced outside the resource graph: .github/workflows/refresh-weights.yml applies
+  # the volume and instance first, waits for the download marker over SSM, then applies again so
+  # this snapshot is created from a volume that actually holds the pack.
+  #
+  # There used to be ignore_changes = [volume_id] here, under a comment about waiting for the
+  # instance to signal completion - which is not what that setting does. Its real effect was to
+  # pin this snapshot to the volume id it first saw, so replacing the staging volume (a new size,
+  # a new AZ, a refreshed pack) never re-snapshotted: the refresh workflow would re-download and
+  # then publish the same stale snapshot id again, forever.
 
   tags = merge(local.common_tags, { Name = "${var.name_prefix}-${var.model}" })
 }

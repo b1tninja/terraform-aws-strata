@@ -23,3 +23,25 @@ misconfigurations:
       from rotating CDN addresses that cannot be pinned to a CIDR. Compensating controls:
       ephemeral instances, one ingress port gated by allowed_cidr_blocks, API key fetched from
       Secrets Manager over IMDSv2 rather than baked into user_data.
+
+  # AVD-AWS-0131 (HIGH): "Instance with unencrypted block device." Six of these, all pointing at
+  # aws_instance.strata (main.tf:314) and aws_instance.strata_spot (main.tf:330) reached through the
+  # examples that call the module. Both resources declare no block device of their own - they are
+  # launch-template based, `launch_template { id = aws_launch_template.strata.id }` - and the
+  # template defines every mapping explicitly encrypted: the /dev/sda1 root at main.tf:222-229 and
+  # each dynamic data-volume branch at 237-245, 256-264 and 273-280. Trivy's Terraform parser does
+  # not follow block devices across a launch-template reference, so the instance looks bare and the
+  # rule reports the device it cannot see rather than the one that will exist.
+  #
+  # Scoped to main.tf rather than global, because that is the only place this pattern occurs; the
+  # module instances that declare root_block_device inline are still checked. What would slip
+  # through: an unencrypted inline block device added to these two instances later. Worth an
+  # assertion over the template's mappings, which the suites do not cover yet.
+  - id: AVD-AWS-0131
+    paths:
+      - "main.tf"
+    statement: >-
+      False positive from launch-template inheritance: aws_instance.strata and strata_spot declare
+      no block devices and take every mapping from aws_launch_template.strata, which sets
+      encrypted = true on the root and on all three data-volume branches (main.tf:222-280).
+      Trivy does not resolve block devices across a launch_template reference.
