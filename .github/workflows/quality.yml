@@ -143,6 +143,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          # trivy.yaml's misconfiguration.terraform.vars key is accepted (the file loads, and the
+          # same file's ignorefile key works) but the values never reached the parser: CI still
+          # logged "Variable values were not found in the environment or variable files" and still
+          # reported aws-0131/aws-0028 against instances whose encryption and IMDS settings are
+          # literals. Trivy binds every flag to a TRIVY_* variable, so this is the direct route and
+          # needs no input from the action - whose own extra-args input could not be confirmed, as
+          # its repository path 404s through the API.
+          TRIVY_TF_VARS: ci/trivy.tfvars
         with:
           scan-type: config
           scan-ref: .
