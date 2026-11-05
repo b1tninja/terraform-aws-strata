@@ -1,46 +1,43 @@
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
+# Local .terraform directories and any state kept outside a backend
+**/.terraform/
+# Provider files
+.terraform.providers
+.terraform.modules
 crash.log
+crash.*.log
+terraform.tfstate*
+*.tfstate
+*.tfstate.backup
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraformrc
+.terraformmodules.json
+*.tfvars
+*.tfvars.json
+
+# Lock files, split by what the directory IS:
+#   examples/ and tests/ are root modules - you run terraform init inside them - so their
+#   provider locks are committed. That is what keeps a plan reproducible later, and it is
+#   Terraform's own recommendation for root modules.
+#   modules/ are libraries consumed by a caller that resolves providers for its own
+#   configuration, so a lock committed there would describe someone else's graph.
+modules/**/.terraform.lock.hcl
+
+# CLI and editor artifacts
 terraform.rc
-
-# Module lock files (only the root lock file should be committed)
-modules/*/.terraform.lock.hcl
-modules/*/.terraform/
-
-# CLI config
-.aws-config.json
-
-# Sensitive
-*.pem
-*.key
-terraform.tfvars
-!terraform.tfvars.example
-
-# Temp / validation output
-v*.txt
-val*.txt
-vv.txt
-bundled-*.txt
-git-status.txt
-gitstatus.txt
-validate*.txt
-schema*.json
-
-# OS
+.hclfmt.json
+.cache/
+.history/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 
-# IDE
-.idea/
-.vscode/
-*.swp
-
-
+# Test and scan output
+coverage/
+*.cover
+trivy-report*

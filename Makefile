@@ -66,7 +66,6 @@ tofu-validate: ## Validate with OpenTofu (drop-in replacement)
 
 quality: fmt-check validate lint security docs catalog-test ## Run all quality checks
 
-clean: ## Remove .terraform directories and state files
+clean: ## Remove .terraform directories (lock files are kept: they are committed for root modules)
 	find . -name .terraform -type d -exec rm -rf {} + 2>/dev/null || true
-	find . -name .terraform.lock.hcl -delete 2>/dev/null || true
 	find . -name '*.tfstate*' -delete 2>/dev/null || true
