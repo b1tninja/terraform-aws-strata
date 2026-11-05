@@ -18,8 +18,9 @@ misconfiguration:
     vars:
       - "ci/trivy.tfvars"
 
-report:
-  # .trivyignore.yaml rather than .trivyignore, because the YAML form carries `statement`, and an
-  # ignore without a written reason is indistinguishable from someone silencing a finding to get
-  # a green check.
-  ignorefile: ".trivyignore.yaml"
+# ignorefile is top-level, not nested under a "report:" key. The reference document groups it under
+# a "## Report options" heading, which is documentation prose, not structure: Trivy maps config
+# keys onto CLI flags, so an unrecognised key becomes an argument and the run dies with
+#   FATAL flag error: unable to parse flag: invalid argument "" for "--report" flag
+# which reads like a broken flag and is really a mis-shaped config file.
+ignorefile: ".trivyignore.yaml"
