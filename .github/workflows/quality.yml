@@ -20,7 +20,10 @@ on:
       - ".github/workflows/quality.yml"
       - "Makefile"
   push:
-    branches: [main]
+    # Both spellings on purpose: this repository's history is on master, while GitHub creates
+    # new repositories on main. Whichever ends up the default branch after publishing, a push to
+    # it has to run CI - a trigger that quietly matches nothing looks identical to a green repo.
+    branches: [main, master]
     paths:
       - "**/*.tf"
       - "**/*.tpl"
@@ -144,16 +147,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: terraform-docs/gh-actions@v1
-        # output-section has no "inputs-outputs" value; the section selection lives in
-        # .terraform-docs.yml's content block, so the workflow must not claim to choose it.
-        # fail-on-diff is reported rather than enforced until the generated tables have been
-        # committed once (make docs in the devcontainer); terraform-docs is not available in
-        # every environment, and an empty generated section is a fact about the repository,
-        # not something to hide behind a permanently red or permanently skipped check.
+        # fail-on-diff is enforced again: the generated tables are now committed, and
+        # `terraform-docs . --config .terraform-docs.yml --output-mode verify` exits 0 against
+        # them. With the old invalid config the tool never parsed this file, so the section was
+        # always empty and enforcing it would have failed every run for the wrong reason.
         with:
           working-dir: .
           config-file: .terraform-docs.yml
           output-file: README.md
-          fail-on-diff: false
+          fail-on-diff: true
 
 

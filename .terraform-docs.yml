@@ -1,11 +1,22 @@
-formatter:
-  type: markdown
-  settings:
-    indent: 2
-    lockfile: .terraform.lock.hcl
-    sort_by_type: true
-    hide:
-      - header
+# Validated against terraform-docs v0.24.0. The shape matters: "formatter" is a plain string
+# naming the formatter, and its options live in the top-level "settings" map, where "lockfile" is
+# a boolean (use the lock file to resolve provider versions), not a path.
+#
+# The file this replaces nested type/settings under "formatter" and listed "hide" as a sequence.
+# terraform-docs refused it outright:
+#   'formatter' expected type 'string', got unconvertible type 'map[string]interface {}'
+# so every invocation that passed --config .terraform-docs.yml failed before reading the module,
+# which means the CI docs job and "make docs" never generated anything at all - and nothing
+# noticed, because the job only compared a section that had never been written.
+formatter: markdown
+
+settings:
+  indent: 2
+  lockfile: true
+
+sort:
+  enabled: true
+  by: name
 
 content: |
   {{ .Inputs }}
@@ -16,11 +27,11 @@ content: |
 
   {{ .Resources }}
 
-# Write between the README's BEGIN_TF_DOCS / END_TF_DOCS markers instead of printing to
-# stdout. Without this block "make docs" reported success and changed nothing, while CI asked
-# terraform-docs to diff README.md - two different ideas about what the command does. mode
-# inject needs the markers to exist, and README carried BEGIN_TERRAFORM_DOCS, which is not the
-# string terraform-docs looks for; both now say BEGIN_TF_DOCS.
 output:
   file: README.md
   mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
