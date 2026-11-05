@@ -36,6 +36,13 @@ on:
     # it has to run CI - a trigger that quietly matches nothing looks identical to a green repo.
     branches: [main, master]
     paths:
+      # This list had drifted from the pull_request one above: it was missing the workflow file
+      # itself, Makefile, **/*.tfvars and the docs inputs, so a push straight to the default branch
+      # that changed CI ran no CI. Proven on this repository's second push: only quality.yml
+      # changed, nothing matched, zero runs.
+      - ".github/workflows/quality.yml"
+      - "Makefile"
+      - "**/*.tfvars"
       - "**/*.tf"
       - "**/*.tpl"
       - "**/*.tftpl"
