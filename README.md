@@ -15,41 +15,61 @@ Strata runs massive MoE models (Qwen3.8-Flash-Next, DeepSeek V4.1) by distributi
 terraform apply → wait 90s → POST /v1/chat/completions → terraform destroy
 ```
 
-## One model, two configurations
+## One model, two behaviours
 
 The routed experts are the expensive part: `NVFP4` is 128 GB of weights. Whether the
 model declines your requests or not is decided by a **267,552-byte** control vector that
 the engine applies while loading them, so the same weights, the same volume, the same
-snapshot and the same image serve two configurations. The difference is one boolean:
+snapshot and the same image serve two behaviours. The difference is one boot hook:
 
 ```hcl
+module "steer" {
+  source       = "./modules/strata-control-vector"
+  model        = "NVFP4"
+  model_family = "nvfp4"
+}
+
 module "strata" {
   source        = "github.com/b1tninja/terraform-aws-strata"
   instance_type = "g7e.8xlarge"   # sm_120: FP4 tensor cores
   model         = "NVFP4"
   model_family  = "nvfp4"
 
-  uncensored    = true            # 261 KiB of steering, not a second 128 GB model
+  boot_hooks    = [module.steer.boot_hook]   # 261 KiB of steering, not a second 128 GB model
 }
 ```
 
-`/v1/models` then reports `strata-nvfp4-nvfp4-uncensored` instead of
-`strata-nvfp4-nvfp4`. Nothing is re-downloaded: the instance fetches the vector from a
-pinned commit, verifies its SHA-256, records it as `user_args` in the model's run config
-— the one documented channel that survives the engine rewriting that file — and restarts
-the container once, costing about a minute of extra boot time.
+The vector must be loaded when the engine starts, so the hook restarts the container once
+(about a minute). After that **one endpoint serves both behaviours**, chosen per request:
+the engine reads `sampling.experimental_speed_projection` and sends it `cvec=0|1`, and
+with the projection off a request is token for token the stock model's. Nothing is
+re-downloaded, and `user_args` is the channel used because it is the one documented field
+that survives the engine rewriting the rest of the run config.
 
-| | stock | uncensored |
+| | stock | projected |
 |---|---|---|
 | weights | 128 GB | *the same* 128 GB |
-| extra bytes | — | **261 KiB** |
-| served name | `strata-nvfp4-nvfp4` | `strata-nvfp4-nvfp4-uncensored` |
+| container | **the same process** | *the same process* |
+| extra bytes | none | **261 KiB** |
+| chosen by | default | `"experimental_speed_projection": true` per request |
 
-Plan fails unless the pack is the NVFP4 GPTQ one the vector was measured on **and** its
-licence permits it: NVIDIA's `NVFP4-NVIDIA` / `NVFP4-QAD` packs are refused, exactly as
-strata-launcher refuses them. Walkthrough:
-[`examples/nvfp4-uncensored`](examples/nvfp4-uncensored); for both configurations at once
-from a single snapshot, [`examples/one-snapshot-two-configs`](examples/one-snapshot-two-configs).
+Three vocabularies describe this mechanism, and the module uses the engine's: **control
+vector** (`--control-vector-scaled`) implementing a **refusal-direction projection**,
+which this engine calls **experimental speed projection** (`cvec=0|1`); the fork that
+publishes the vector and the Windows launcher call the result **uncensored**. It is not
+OrcaRouter-style *abliteration*, which edits the weights.
+
+Two gates run at plan time. **Lineage:** the vector is one direction in
+Qwen3.8-Flash-Next's activation space, so it applies to packs derived from those weights -
+upstream measured it on `qwen-nvfp4-gptq`, ISTA's Q2_0 and IQ2_XS, and Unsloth's
+UD-Q4_K_XL, "works unchanged on all three quants, with no rescaling" - but not to Swift 1.5
+or the Coder, which are other weights. **Licence:** NVIDIA's `NVFP4-NVIDIA` / `NVFP4-QAD`
+quants are refused because the NVIDIA Open Model License does not allow bypassing the
+model's safety guardrails, which is a permission limit rather than a technical one.
+Walkthrough: [`examples/nvfp4-uncensored`](examples/nvfp4-uncensored); for isolated
+endpoints sharing one snapshot,
+[`examples/one-snapshot-two-configs`](examples/one-snapshot-two-configs); for serving
+policies as separate states, [`examples/layered-stacks`](examples/layered-stacks).
 
 ## Quick Start
 
@@ -93,8 +113,9 @@ before loading a model.
 | `g6.*` | NVIDIA L4 (24GB) | 8.9 (Ada) | ✅ Works |
 | `g5.*` | NVIDIA A10G (24GB) | 8.6 (Ampere) | ✅ Works |
 | `p5.*` `p5e.*` `p5en.*` | H100 / H200 | 9.0 (Hopper) | ❌ No engine package |
-| [nvfp4-uncensored](examples/nvfp4-uncensored) | Same weights + control vector | The second configuration of one model |
-| [one-snapshot-two-configs](examples/one-snapshot-two-configs) | Two endpoints, one weights snapshot | Both configurations side by side |
+| [nvfp4-uncensored](examples/nvfp4-uncensored) | Same weights + control vector | Two behaviours from one endpoint, per request |
+| [one-snapshot-two-configs](examples/one-snapshot-two-configs) | Two endpoints, one weights snapshot | Isolation without duplicating model bytes |
+| [layered-stacks](examples/layered-stacks) | Base stack owns the snapshot, second stack owns the policy | Serving policies as separate states |
 
 | `p6-b200.*` `p6-b300.*` `p6e-gb200.*` | B200 / B300 / GB200 | 10.x | ❌ No engine package |
 | `g5g.*` | Graviton + GPU | arm64 | ❌ Images are x86-64, need AVX2 |

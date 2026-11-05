@@ -7,5 +7,6 @@ For most cases use the **root module**, which also wires VPC lookup, IAM, Secret
 and EventBridge Scheduler. Reach for this one when you already have an AMI, a subnet and
 a security group and want a single instance without the rest.
 
-It takes the control-vector settings as one object, `uncensor`, so the pins live in the
-root module's `uncensor.tf` and cannot drift between the two callers.
+It takes the same `boot_hooks` input as the root module, so behaviour is composed one way
+only, whichever entrypoint you use; the pins for the shipped hook live in
+`modules/strata-control-vector`.

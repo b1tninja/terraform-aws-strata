@@ -161,26 +161,25 @@ variable "extra_env" {
   default     = {}
 }
 
-variable "uncensored" {
+variable "boot_hooks" {
   description = <<-EOT
-    Serve the model with a refusal-removing control vector applied, as a second
-    configuration of the SAME weights rather than as a second model.
+    Shell fragments to splice into the boot script, in order, after the model reports
+    healthy. This is the extension point: the core module deliberately knows nothing
+    about what a hook does, so new serving behaviour arrives as a module rather than as
+    another input here. They are called hooks rather than layers because a control
+    vector already owns the word "layer" in this project.
 
-    The instance downloads a 261 KiB control vector, verifies its SHA-256 against a
-    pinned commit, and records it as the engine arguments user_args in the model's run
-    config on the data volume; the container is restarted and serves the same model
-    directory under the name <model>-uncensored. Nothing is re-downloaded and the image
-    is untouched - the routed experts are the expensive part, so one volume, snapshot or
-    AMI works for both configurations.
+    Contract offered to a hook: it runs as root with $DATA_MOUNT, $DATA_DEVICE, $MODEL,
+    $MODEL_FAMILY, $PORT, $REGION, $HEALTH_TIMEOUT and wait_loaded() in scope, and with
+    set -euo pipefail active, so a failing hook aborts the boot. A hook is opaque text
+    and Terraform cannot check it against the script, so tests/boot_hooks asserts the
+    contract for whatever ships in this repository.
 
-    Offered only for the NVFP4 GPTQ pack (model = "NVFP4" with family = "nvfp4", the
-    weights the vector was made and measured on) and only under a licence that permits
-    it: NVIDIA's NVFP4 and FP4-Local packs are refused, as strata-launcher refuses them.
-    Adds roughly a minute of boot time for the second load and about 5% on full
-    projection throughput; see README.md and examples/nvfp4-uncensored.
+    The shipped hook loads a control vector so one model serves two behaviours:
+      boot_hooks = [module.steer.boot_hook]   # see modules/strata-control-vector
   EOT
-  type        = bool
-  default     = false
+  type        = list(string)
+  default     = []
 }
 
 # ─── Lifecycle ────────────────────────────────────────────────────────────────

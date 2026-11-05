@@ -41,9 +41,14 @@ validate: ## Validate all modules and examples
 	cd examples/ephemeral-on-demand && $(TF) validate
 	cd examples/spot-fleet && $(TF) validate
 	cd examples/full-pipeline && $(TF) validate
+	cd examples/nvfp4-uncensored && $(TF) validate
+	cd examples/one-snapshot-two-configs && $(TF) validate
+	cd examples/layered-stacks/base && $(TF) validate
+	cd examples/layered-stacks/uncensored && $(TF) validate
 
 catalog-test: ## Assert the model/instance catalog by planning tests/catalog (no AWS creds)
 	$(TF) -chdir=tests/catalog plan -no-color
+	$(TF) -chdir=tests/boot_hooks plan -no-color
 
 lint: ## Run tflint on all modules
 	$(TFLINT) --init

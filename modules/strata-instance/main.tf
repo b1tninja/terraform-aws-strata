@@ -126,6 +126,12 @@ variable "extra_env" {
   default = {}
 }
 
+variable "boot_hooks" {
+  description = "Shell fragments to splice into the boot script after the model is healthy; see the root module's variable of the same name for the contract hooks rely on."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
@@ -153,11 +159,7 @@ locals {
     health_check_timeout = var.health_check_timeout
     ttl_minutes          = var.ttl_minutes
     region               = "us-east-1"
-    uncensored           = var.uncensor == null ? "false" : tostring(var.uncensor.enabled)
-    uncensor_base        = var.uncensor == null ? "" : var.uncensor.base
-    uncensor_file_pins   = var.uncensor == null ? "" : var.uncensor.file_pins
-    uncensor_args_json   = var.uncensor == null ? "[]" : var.uncensor.args_json
-    uncensor_vector      = var.uncensor == null ? "" : var.uncensor.vector
+    boot_hooks             = var.boot_hooks
   }), "\r\n", "\n")
 
   common_tags = merge(var.tags, {

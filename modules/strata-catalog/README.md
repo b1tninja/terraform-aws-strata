@@ -6,7 +6,7 @@ resources: it is data plus checks, so it plans without AWS credentials.
 The root module calls it to derive `data_volume_size`, to reject a model/family
 combination that upstream does not publish, to reject compute the engine has no build
 for (P5/P6 have no engine package — the container exits 3 before loading anything), and
-to decide whether the control-vector licence gate permits `uncensored = true`.
+to decide whether a control-vector hook may be attached at all (lineage and licence).
 
 ## Usage
 

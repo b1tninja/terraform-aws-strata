@@ -193,11 +193,7 @@ locals {
     health_check_timeout = var.health_check_timeout_seconds
     ttl_minutes          = var.ttl_minutes
     region               = data.aws_region.current.region
-    uncensored           = tostring(local.uncensor_enabled)
-    uncensor_base        = local.uncensor_base
-    uncensor_file_pins   = local.uncensor_file_pins
-    uncensor_args_json   = jsonencode(local.uncensor_recipe)
-    uncensor_vector      = local.uncensor_vector
+    boot_hooks             = var.boot_hooks
   }), "\r\n", "\n")
 }
 

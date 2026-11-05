@@ -1,22 +1,26 @@
-# Example: one model, two configurations.
+# Example: one model, two behaviours, chosen per request.
 #
-# The routed experts are the expensive part. NVFP4 GPTQ is 128 GB of weights, and it
-# is the same 128 GB whether the model declines your requests or not. The refusal
-# direction is a 261 KiB control vector that the engine applies at load time, so this
-# deployment differs from a stock one by one boolean:
+# The routed experts are the expensive part: NVFP4 is 128 GB. What decides whether the
+# model declines a request is a 267,552-byte control vector that the engine applies while
+# generating, so the steered behaviour is not a second model - it is not even a second
+# deployment. Load the vector once and this one endpoint serves both:
 #
-#   terraform apply -var="uncensored=false"   # strata-nvfp4-nvfp4
-#   terraform apply -var="uncensored=true"    # strata-nvfp4-nvfp4-uncensored
+#   curl $EP/v1/chat/completions \
+#     -d '{"model":"m","messages":[{"role":"user","content":"..."}]}'
+#   # stock: token for token the original model, because default_on = false wrote
+#   # "sampling": {"experimental_speed_projection": false} into the run config.
 #
-# Same instance type, same weights snapshot, same volume size, same image, same
-# download. The vector is fetched at boot, checked against a pinned SHA-256, and
-# written into the model's run config as user_args; the container restarts once and
-# serves the same model directory under a name ending in -uncensored.
+#   curl $EP/v1/chat/completions \
+#     -d '{"model":"m","experimental_speed_projection":true,"messages":[...]}'
+#   # projection on for this request only.
+#
+# Nothing is re-downloaded: same volume, same snapshot, same image, same model name.
 #
 # Usage:
 #   terraform init
-#   terraform apply -var="weights_snapshot_id=snap-0abc123..."   # optional
-#   curl -s http://$(terraform output -raw public_ip):8080/v1/models
+#   terraform apply                                   # downloads weights on first boot
+#   terraform apply -var="weights_snapshot_id=snap-0abc123..."   # or restore a snapshot
+#   terraform output request_switch                   # what the caller sends to choose
 #   terraform destroy
 
 terraform {
@@ -39,12 +43,6 @@ variable "region" {
   default = "us-east-1"
 }
 
-variable "uncensored" {
-  description = "false serves the model as published; true serves the same weights with the control vector applied"
-  type        = bool
-  default     = true
-}
-
 variable "weights_snapshot_id" {
   description = "EBS snapshot of a volume that already holds the NVFP4 weights. Omit to download them on first boot."
   type        = string
@@ -52,13 +50,30 @@ variable "weights_snapshot_id" {
 }
 
 variable "instance_type" {
-  description = "sm_120 (Blackwell RTX) only, if you want the vector applied on FP4 tensor cores rather than in the 8-bit fallback path"
+  description = "sm_120 (Blackwell RTX) if you want the projection on FP4 tensor cores rather than in the 8-bit fallback path"
   type        = string
   default     = "g7e.8xlarge"
 }
 
+variable "default_on" {
+  description = "false keeps the endpoint stock until a caller asks for the projection; true makes the projection the default and a caller opts out"
+  type        = bool
+  default     = false
+}
+
+# The hook. It holds the pins, runs the lineage and licence gates, and renders the shell
+# fragment that the core module splices in after the model is healthy.
+module "steer" {
+  source = "../../modules/strata-control-vector"
+
+  model        = "NVFP4"
+  model_family = "nvfp4"
+
+  default_on = var.default_on
+}
+
 module "strata" {
-  # The registry convention is to show the address an external caller would use:
+  # Registry convention is the address an external caller would use:
   #   source = "github.com/b1tninja/terraform-aws-strata"
   # The relative path is used here so the example validates before that repository
   # exists; switch it when you copy this directory into your own project.
@@ -71,23 +86,24 @@ module "strata" {
   model        = "NVFP4"
   model_family = "nvfp4"
 
-  # The one line that matters for this example.
-  uncensored = var.uncensored
+  # The one line that adds the second behaviour. The core knows only that a hook is a
+  # shell fragment to splice in after the health check - it has no idea what this one does.
+  boot_hooks = [module.steer.boot_hook]
 
-  # data_volume_size is deliberately unset: the catalog derives 180 GiB for NVFP4
-  # (download + conversion headroom), which both configurations share.
+  # data_volume_size deliberately unset: the catalog derives 180 GiB for NVFP4, and both
+  # behaviours read the same bytes from it.
   weights_snapshot_id = var.weights_snapshot_id
 
   use_spot    = true
   ttl_minutes = 90
 
   tags = {
-    Purpose = "one-model-two-configurations"
+    Purpose = "one-model-two-behaviours"
   }
 }
 
 output "endpoint" {
-  description = "OpenAI-compatible base URL"
+  description = "OpenAI-compatible base URL serving both behaviours"
   value       = module.strata.api_endpoint
 }
 
@@ -95,12 +111,17 @@ output "public_ip" {
   value = module.strata.public_ip
 }
 
-output "uncensored" {
-  description = "Which of the two configurations this endpoint serves"
-  value       = module.strata.uncensored
+output "request_switch" {
+  description = "What a caller sends to choose the behaviour for one request"
+  value       = module.steer.request_switch
 }
 
 output "control_vector" {
-  description = "The pinned bytes that make this configuration differ from the stock one"
-  value       = module.strata.control_vector
+  description = "The pinned bytes that make the second behaviour possible, and the licence ground it stands on"
+  value       = module.steer.control_vector
+}
+
+output "boot_hooks" {
+  description = "Proof from the plan that the hook reached the deployment"
+  value       = module.strata.boot_hooks
 }
