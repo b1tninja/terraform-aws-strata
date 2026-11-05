@@ -61,10 +61,29 @@ output "ttl_terminate_schedule_arn" {
 }
 
 output "boot_hooks" {
-  description = "How many boot hooks this deployment splices into the boot script, and how large each one is"
+  description = "How many fragments each splice point contributes, and how large each one is"
   value = {
-    count   = length(var.boot_hooks)
-    lengths = [for hook in var.boot_hooks : length(hook)]
+    post_ready_count   = length(var.boot_hooks)
+    post_ready_lengths = [for hook in var.boot_hooks : length(hook)]
+    pre_start_count    = length(var.pre_start_hooks)
+    pre_start_lengths  = [for hook in var.pre_start_hooks : length(hook)]
+  }
+}
+
+output "catalog_notes" {
+  description = "What the catalog makes of this model/family/instance combination, as a list. Nothing here blocks a deploy; the things that should have failed the plan in preflight.tf."
+  value       = module.catalog.notes
+}
+
+# The catalog has always sorted findings into blockers (raised by preflight.tf) and advice
+# (returned in notes), but nothing in the root module ever read notes, so the advice existed and
+# went nowhere: a budget pack silently spilling to SSD, or NVFP4 running at 8-bit precision on a
+# card without FP4 tensor cores, never reached whoever ran the plan. A check block is the right
+# primitive because it warns during plan without failing it - the exact line the catalog draws.
+check "catalog_advice" {
+  assert {
+    condition     = length(module.catalog.notes) == 0
+    error_message = "advice from the catalog, none of it blocking:\n  - ${join("\n  - ", module.catalog.notes)}"
   }
 }
 

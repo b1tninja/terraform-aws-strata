@@ -70,6 +70,16 @@ module "tight_ram" {
   instance_type = "g5.8xlarge"
 }
 
+# The same pack on a box with enough RAM does not spill, so it must not get the scratch
+# advice. NVFP4 wants 80 GiB; g7.4xlarge has 64 and g7e.8xlarge has 256.
+module "budget_spill" {
+  source = "../../modules/strata-catalog"
+
+  model         = "NVFP4"
+  model_family  = "nvfp4"
+  instance_type = "g7.4xlarge"
+}
+
 resource "terraform_data" "assertions" {
   input = "catalog invariants"
 
@@ -138,6 +148,19 @@ resource "terraform_data" "assertions" {
     precondition {
       condition     = can(regex("RAM-budget mode", module.tight_ram.notes[0]))
       error_message = "Q8_0 on 128 GiB of RAM (below its 136 GiB need) should explain RAM-budget mode."
+    }
+
+    # ─── Scratch advice (modules/strata-instance-store) ────────────────────────────
+    # The advice exists to connect a known spill to a disk that is already paid for, so it
+    # must appear when the pack spills and stay quiet when it does not. Both directions are
+    # asserted: an always-on note would be noise, a never-firing one would be dead code.
+    precondition {
+      condition     = anytrue([for n in module.budget_spill.notes : can(regex("instance-store NVMe", n))])
+      error_message = "NVFP4 on g7.4xlarge has 64 GiB of RAM against an 80 GiB need, so it spills and should be pointed at the local NVMe."
+    }
+    precondition {
+      condition     = !anytrue([for n in module.nvfp4_on_blackwell.notes : can(regex("instance-store NVMe", n))])
+      error_message = "NVFP4 on g7e.8xlarge has 256 GiB of RAM, above its need: nothing spills, so the scratch advice must not fire."
     }
   }
 }

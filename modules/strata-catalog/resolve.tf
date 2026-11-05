@@ -27,6 +27,20 @@ locals {
   # contains commas inside "${ }".
   supported_sm_list = join(", ", [for c in local.supported_compute_capabilities : format("sm_%d", floor(c * 10))])
 
+  # A budget pack below its RAM need is the one case where serving touches the disk, and the
+  # disk is the one thing this stack can change for free: these families ship instance-store
+  # NVMe rated far above gp3's default. Advisory only, deliberately: whether the pack fits that
+  # disk is modules/strata-instance-store's plan-time job, and the layer itself is unmeasured on
+  # real hardware. Both figures must be known, which is why ram_gb = null packs (UD-Q8_K_XL)
+  # never produce this note - an unknown need is not a spill.
+  spills_to_ssd = (
+    local.known_model && local.known_instance && try(local.model.budget, false) &&
+    local.instance.supported &&
+    try(local.model.ram_gb, null) != null && local.instance_ram_gib != null &&
+    local.instance_ram_gib < local.model.ram_gb
+  )
+  has_scratch = try(local.instance.reference.nvme_gib, null) != null
+
   notes = concat(
     local.known_model ? [] : ["model \"${var.model}\" is not in the catalog; known sizes: ${join(", ", local.model_ids)}"],
     local.known_family ? [] : ["model_family \"${var.model_family}\" is not a Strata family; known families: ${join(", ", local.family_names)}"],
@@ -54,6 +68,9 @@ locals {
         "system RAM is ${local.instance_ram_gib} GiB, below the ${local.model.ram_gb} GiB Strata wants to keep every expert of \"${var.model}\" resident${local.model.budget ? "; it will run in RAM-budget mode with roughly ${local.instance_ram_gib - 24} GiB of experts resident and read the rest from SSD" : "; a larger instance or a smaller size is recommended"}"
       ]
     ) : [],
+    local.spills_to_ssd && local.has_scratch ? [
+      "this pack reads experts it cannot pin in RAM from SSD, and the ${local.instance.family} family advertises instance-store NVMe (about ${local.instance.reference.nvme_gib} GiB on the reference size ${local.instance.reference.instance_type}); modules/strata-instance-store can serve the pack from it - opt-in, unmeasured on real hardware, and its own plan-time check decides whether the pack fits"
+    ] : [],
   )
 
   hard_error = (
