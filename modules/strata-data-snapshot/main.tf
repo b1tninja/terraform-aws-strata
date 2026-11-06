@@ -147,6 +147,32 @@ resource "aws_instance" "staging" {
   key_name               = var.key_pair_name != "" ? var.key_pair_name : null
   vpc_security_group_ids = [aws_security_group.staging.id]
 
+  # IMDSv2 only. This instance downloads weights and then gets snapshotted and destroyed, and it
+  # carries no IAM instance profile at all, so nothing running on it has any business minting AWS
+  # credentials. Requiring the token is what stops a request-forgery against the download tooling
+  # from reading a credential out of the metadata service.
+  #
+  # Hop limit 1 keeps cloud-init working (it runs on the host) while making IMDS unreachable from
+  # inside the engine container that performs the download, matching the root module's posture.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  # Encrypted explicitly rather than by account default: the default-encryption setting is regional
+  # state that Terraform does not own and a plan cannot see, so relying on it makes the finding
+  # disappear on some accounts and reappear on others.
+  #
+  # Deliberately no volume_size. The AMI is whatever the caller passes (staging_ami_id, falling back
+  # to Ubuntu), and a root volume smaller than the AMI's own snapshot fails at apply time - which
+  # would be an awkward way to discover this on a run that is mostly download time. The weights
+  # never land here anyway; they go to aws_ebs_volume.staging.
+  root_block_device {
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
   # Spot is a real discount on a run that is mostly waiting on the network, with a catch
   # worth stating: the download is long, and a reclamation mid-way means starting it over,
   # because nothing resumes it. The data volume is a separate resource and survives, so the
