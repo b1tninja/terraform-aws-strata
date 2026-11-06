@@ -226,26 +226,43 @@ else
     *-cuda12) CUDA_FLOOR="525" ;;
     *) CUDA_FLOOR="" ;;
   esac
+
+  # 525 is the CUDA 12 *toolkit* floor, and it is not enough for this hardware. Blackwell support
+  # arrived in CUDA 12.8, whose release notes state "This release adds compiler support for the
+  # following Nvidia Blackwell GPU architectures: SM_100 SM_101 SM_120" and list a minimum Linux
+  # driver of 570.26 for 12.8 GA. A driver on the 525 branch will happily satisfy the toolkit and
+  # then fail to load anything compiled for sm_120, so the architecture raises the requirement.
+  # Pre-Blackwell cards (g5 = sm_86, g6e/g6 = sm_89) keep the toolkit floor.
+  CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d ' ')
+  # Avoid shell default-expansion syntax (dollar brace, name, colon, dash) anywhere in this file,
+  # including in comments: this is a Terraform template, so dollar-brace begins an interpolation
+  # whether it sits in code or in a comment, and the failure arrives as "Error in function call"
+  # against whatever resource called templatefile - pointing at main.tf, never at the template.
+  CC_LABEL=$CC
+  if [ -z "$CC_LABEL" ]; then CC_LABEL="unknown"; fi
+  case "$CC" in
+    1[0-9].*) ARCH_FLOOR="570.26" ;;
+    *) ARCH_FLOOR="" ;;
+  esac
+
   MIN_DRIVER="${min_driver_version}"
-  if [ -n "$CUDA_FLOOR" ] && [ -n "$MIN_DRIVER" ]; then
-    # Two floors, take the higher: an override below the toolkit's requirement is a mistake, and
-    # one above it is the caller knowing something this script does not.
-    FLOOR=$(printf '%s\n%s\n' "$CUDA_FLOOR" "$MIN_DRIVER" | sort -V | tail -n 1)
-  elif [ -n "$CUDA_FLOOR" ]; then
-    FLOOR="$CUDA_FLOOR"
-  else
-    FLOOR="$MIN_DRIVER"
-  fi
+  # Effective floor is the highest of: what the CUDA family needs, what the GPU architecture needs,
+  # and what the caller pinned. An override below either requirement is a mistake rather than a
+  # preference, so it cannot lower the floor - it can only raise it. grep -v drops the empty
+  # entries; if all three are empty the check is skipped entirely.
+  FLOOR=$(printf '%s\n' "$CUDA_FLOOR" "$ARCH_FLOOR" "$MIN_DRIVER" | grep -v '^[[:space:]]*$' | sort -V | tail -n 1)
   if [ -n "$FLOOR" ]; then
     # sort -V rather than string comparison: "9.1" sorts above "10.2" as a string.
     lowest=$(printf '%s\n%s\n' "$FLOOR" "$DRIVER_VER" | sort -V | head -n 1)
     if [ "$lowest" != "$FLOOR" ]; then
       echo "ERROR: driver $DRIVER_VER is below the $FLOOR floor for image tag $STRATA_IMAGE_TAG."
-      echo "       NVIDIA requires >=580 to run CUDA 13 builds and >=525 for CUDA 12."
-      echo "       Choose an AMI with a newer driver, or the -cuda12 variant of this tag."
+      echo "       NVIDIA requires >=580 to run CUDA 13 builds, >=525 for CUDA 12 builds, and >=570.26"
+      echo "       to run Blackwell (sm_100/sm_101/sm_120) code at all, which is what raised this floor."
+      echo "       Compute capability: $CC_LABEL. Choose an AMI with a newer driver, or the"
+      echo "       -cuda12 variant of this tag if the AMI is on the 570 branch."
       exit 1
     fi
-    echo "  Driver satisfies the $FLOOR floor for $STRATA_IMAGE_TAG."
+    echo "  Driver satisfies the $FLOOR floor for $STRATA_IMAGE_TAG (compute capability $CC_LABEL)."
   fi
 fi
 

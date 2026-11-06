@@ -249,7 +249,7 @@ reaches the container through a `0600` `--env-file`. To read it back:
 terraform output api_key
 ```
 
-### Two things Terraform will not tell you
+### Three things Terraform will not tell you
 
 - **Containers on the instance cannot reach IMDS, on purpose.** `metadata_options` sets
   `http_put_response_hop_limit = 1`. AWS documents that a hop limit of 1 "can cause issues" in
@@ -264,6 +264,15 @@ terraform output api_key
   something else. This module's answer is to replace rather than mutate — instances are ephemeral and
   the durable artifacts are the snapshot and the AMI — so treat an existing instance as disposable
   instead of trying to tune it in place.
+- **"Serving in ~90 seconds" assumes the FSR state is already `enabled`.** Fast Snapshot Restore is
+  a state machine — `aws_ebs_fast_snapshot_restore` reports `enabling`, `optimizing`, `enabled`,
+  `disabling`, `disabled`, and the provider gives create/delete timeouts of 10 minutes each. A volume
+  created from the snapshot while the state is still `enabling` or `optimizing` is created normally
+  and falls back to lazy loading, which is the behaviour the whole snapshot path exists to avoid. If
+  a first boot is unexpectedly slow, check the state before suspecting the model:
+  `aws ec2 describe-snapshots-restore-status --snapshot-ids "$SNAP"`. Whether the provider waits for
+  `enabled` during create is documented only implicitly (the timeouts and `state` attribute suggest
+  it) and has not been observed here.
 
 ## Why Not SageMaker / Bedrock
 
@@ -306,7 +315,7 @@ hand; it is rewritten in place._
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | EC2 instance type. See docs/MODELS.md for recommendations per model. | `string` | `"g6e.8xlarge"` | no |
 | <a name="input_key_pair_name"></a> [key\_pair\_name](#input\_key\_pair\_name) | EC2 key pair name for SSH access (optional) | `string` | `""` | no |
 | <a name="input_kv_quantization"></a> [kv\_quantization](#input\_kv\_quantization) | KV cache quantization (int8, q4\_0, k8v4, fp16) | `string` | `"int8"` | no |
-| <a name="input_min_driver_version"></a> [min\_driver\_version](#input\_min\_driver\_version) | Extra floor for the boot-time driver check, e.g. "580.126.04". Empty (the default) does NOT<br/>mean unchecked: the boot already derives a floor from the image tag using NVIDIA's published<br/>compatibility table - CUDA 13.x needs driver >= 580, CUDA 12.x needs >= 525 - and refuses to<br/>start the container below it. Set this only to raise the requirement further; a value below<br/>the tag's own floor is ignored, because that floor is not a preference.<br/><br/>The reason this is enforced at boot rather than at plan: a driver older than the image's CUDA<br/>build produces no plan-time error. The container starts, the engine reports an insufficient<br/>driver version, and the instance bills while it does. | `string` | `""` | no |
+| <a name="input_min_driver_version"></a> [min\_driver\_version](#input\_min\_driver\_version) | Extra floor for the boot-time driver check, e.g. "580.126.04". Empty (the default) does NOT<br/>mean unchecked: the boot derives a floor from two things and takes the higher.<br/><br/>  - the image tag's CUDA family: CUDA 13.x needs driver >= 580, CUDA 12.x >= 525<br/>    (NVIDIA CUDA compatibility table)<br/>  - the GPU's compute capability: Blackwell (sm\_100/sm\_101/sm\_120) needs >= 570.26 even on<br/>    CUDA 12, because Blackwell support arrived in CUDA 12.8 - so a g7e/g7 box is held to 570.26<br/>    under -cuda12 and 580 under -cuda13, while pre-Blackwell cards keep the toolkit floor<br/><br/>Set this only to raise the requirement further; a value below those floors is ignored, because<br/>they are not preferences.<br/><br/>The reason this is enforced at boot rather than at plan: a driver older than the image's CUDA<br/>build produces no plan-time error. The container starts, the engine reports an insufficient<br/>driver version, and the instance bills while it does. | `string` | `""` | no |
 | <a name="input_model"></a> [model](#input\_model) | Strata model identifier (e.g. IQ3\_XXS, Q2\_0, IQ2\_XS, UD-Q6\_K\_XL, NVFP4). The catalog in modules/strata-catalog lists every accepted value and derives the volume size from it. | `string` | `"IQ3_XXS"` | no |
 | <a name="input_model_family"></a> [model\_family](#input\_model\_family) | Model family: qwen, swift, coder, unsloth, gyro, nvfp4 or deepseek41 | `string` | `"qwen"` | no |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | Prefix for all resource names | `string` | `"strata"` | no |

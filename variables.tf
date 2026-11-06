@@ -289,10 +289,16 @@ variable "boot_hooks" {
 variable "min_driver_version" {
   description = <<-EOT
     Extra floor for the boot-time driver check, e.g. "580.126.04". Empty (the default) does NOT
-    mean unchecked: the boot already derives a floor from the image tag using NVIDIA's published
-    compatibility table - CUDA 13.x needs driver >= 580, CUDA 12.x needs >= 525 - and refuses to
-    start the container below it. Set this only to raise the requirement further; a value below
-    the tag's own floor is ignored, because that floor is not a preference.
+    mean unchecked: the boot derives a floor from two things and takes the higher.
+
+      - the image tag's CUDA family: CUDA 13.x needs driver >= 580, CUDA 12.x >= 525
+        (NVIDIA CUDA compatibility table)
+      - the GPU's compute capability: Blackwell (sm_100/sm_101/sm_120) needs >= 570.26 even on
+        CUDA 12, because Blackwell support arrived in CUDA 12.8 - so a g7e/g7 box is held to 570.26
+        under -cuda12 and 580 under -cuda13, while pre-Blackwell cards keep the toolkit floor
+
+    Set this only to raise the requirement further; a value below those floors is ignored, because
+    they are not preferences.
 
     The reason this is enforced at boot rather than at plan: a driver older than the image's CUDA
     build produces no plan-time error. The container starts, the engine reports an insufficient

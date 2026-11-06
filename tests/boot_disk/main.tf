@@ -322,6 +322,17 @@ resource "terraform_data" "driver_gate" {
       condition     = can(regex("CUDA_FLOOR=.580", local.script)) && can(regex("CUDA_FLOOR=.525", local.script))
       error_message = "The boot must derive the driver floor from the image tag's CUDA family (580 for cuda13, 525 for cuda12)."
     }
+
+    # The toolkit floor alone is too permissive on this hardware: Blackwell needs 570.26 even under
+    # CUDA 12.8, and a 525-branch driver satisfies the toolkit yet cannot load sm_120 code. The
+    # architecture check is therefore load-bearing, not decoration.
+    precondition {
+      condition = (
+        can(regex("query-gpu=compute_cap", local.script)) &&
+        can(regex("ARCH_FLOOR=.570[.]26", local.script))
+      )
+      error_message = "The boot must raise the driver floor for Blackwell (compute capability 10.x+) to 570.26, because CUDA 12.8+ is required to run sm_120 kernels regardless of the toolkit floor."
+    }
   }
 }
 
