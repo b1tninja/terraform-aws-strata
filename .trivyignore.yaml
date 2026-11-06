@@ -35,8 +35,10 @@ misconfigurations:
   #
   # Scoped to main.tf rather than global, because that is the only place this pattern occurs; the
   # module instances that declare root_block_device inline are still checked. What would slip
-  # through: an unencrypted inline block device added to these two instances later. Worth an
-  # assertion over the template's mappings, which the suites do not cover yet.
+  # through - an unencrypted inline block device added to these two instances later, or an ebs
+  # mapping that loses its encrypted setting - is guarded by tests/block_devices, which reads
+  # main.tf and fails on either. That suite is the expiry date on this suppression: change the
+  # block-device layout and the test sends you back to re-justify the ignore.
   - id: AVD-AWS-0131
     paths:
       - "main.tf"
